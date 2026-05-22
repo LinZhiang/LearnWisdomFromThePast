@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+  <defs>
+    <linearGradient id="skz-bg" x1="10" y1="6" x2="54" y2="58" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1e3a8a" />
+      <stop offset="0.45" stop-color="#1d4ed8" />
+      <stop offset="1" stop-color="#2563eb" />
+    </linearGradient>
+    <linearGradient id="skz-gold" x1="34" y1="34" x2="52" y2="52" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fcd34d" />
+      <stop offset="1" stop-color="#d97706" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#skz-bg)" />
+  <!-- 试卷 -->
+  <path
+    fill="#fff"
+    fill-opacity="0.96"
+    d="M21 13h20.5a2.8 2.8 0 0 1 2.8 2.8v32.4a2.8 2.8 0 0 1-2.8 2.8H21a2.8 2.8 0 0 1-2.8-2.8V15.8A2.8 2.8 0 0 1 21 13Z"
+  />
+  <path fill="#93c5fd" d="M24.5 21h14v2.4h-14zm0 6.2h14v2.4h-14zm0 6.2h9.5v2.4h-9.5z" />
+  <!-- 笔尖（作答 / 进阶） -->
+  <path
+    fill="url(#skz-gold)"
+    d="M35.2 35.6 44.4 44.8l-3.6 3.6-9.2-9.2 1.9-1.9a2.1 2.1 0 0 1 2.97 0l.73.73Z"
+  />
+  <path fill="#fff7ed" fill-opacity="0.92" d="m38.4 38.8 2.1 2.1-1.35 1.35-2.1-2.1z" />
+  <!-- AI 点缀 -->
+  <circle cx="46.5" cy="17" r="2.4" fill="#fef08a" />
+  <circle cx="50.5" cy="21.5" r="1.35" fill="#fde047" fill-opacity="0.95" />
+</svg>

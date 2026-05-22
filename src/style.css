@@ -1,0 +1,368 @@
+:root {
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial,
+    sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/**
+ * 主题变量挂在 html + body，与 App.vue 中同步的 app-theme-* class 一致。
+ * 这样 Element Plus Teleport 到 body 的弹层、消息也能继承同一套色板。
+ */
+html.app-theme-light,
+body.app-theme-light {
+  color: #1f2937;
+  --el-text-color-placeholder: #a8abb2;
+  /* 最外层画布：与 shell 底层渐变一致，切换风格时整页底色联动 */
+  --app-outer-canvas: #e2e8f0;
+  background-color: var(--app-outer-canvas);
+  --app-text: #111827;
+  --app-text-muted: #4b5563;
+  --app-border: #d1d5db;
+  --app-border-soft: #e5e7eb;
+  /* 衬底 RGB（无 alpha），与 #app .app-shell 上的 --app-chrome-opacity 组合 */
+  --app-surface-chrome: 255 255 255;
+  --app-surface-alt-chrome: 248 250 252;
+  --app-surface: rgb(var(--app-surface-chrome) / 0.92);
+  --app-surface-alt: rgb(var(--app-surface-alt-chrome) / 0.92);
+  --app-primary: #2563eb;
+  --app-primary-soft: #dbeafe;
+  --app-primary-soft-chrome: 219 234 254;
+  --app-danger: #dc2626;
+  --el-color-primary: var(--app-primary);
+  --el-color-danger: var(--app-danger);
+  --el-text-color-primary: var(--app-text);
+  --el-text-color-regular: var(--app-text-muted);
+  --el-border-color: var(--app-border);
+  --el-border-color-light: var(--app-border-soft);
+  --el-fill-color-blank: var(--app-surface);
+  --el-fill-color-light: var(--app-surface-alt);
+  /* 斑马纹行（el-table stripe），须与 --app-text 有足够对比 */
+  --el-fill-color-lighter: #f1f5f9;
+  --el-bg-color: #ffffff;
+  --el-bg-color-page: var(--app-surface-alt);
+  --el-mask-color: rgba(0, 0, 0, 0.55);
+}
+
+html.app-theme-dark,
+body.app-theme-dark {
+  color: #e5e7eb;
+  --el-text-color-placeholder: #94a3b8;
+  --app-outer-canvas: #020617;
+  background-color: var(--app-outer-canvas);
+  --app-text: #f3f4f6;
+  --app-text-muted: #cbd5e1;
+  --app-border: #475569;
+  --app-border-soft: #334155;
+  --app-surface-chrome: 15 23 42;
+  --app-surface-alt-chrome: 30 41 59;
+  --app-surface: rgb(var(--app-surface-chrome) / 0.92);
+  --app-surface-alt: rgb(var(--app-surface-alt-chrome) / 0.92);
+  --app-primary: #60a5fa;
+  --app-primary-soft: #1e3a8a;
+  --app-primary-soft-chrome: 30 58 138;
+  --app-danger: #f87171;
+  --el-color-primary: var(--app-primary);
+  --el-color-danger: var(--app-danger);
+  --el-text-color-primary: var(--app-text);
+  --el-text-color-regular: var(--app-text-muted);
+  --el-border-color: var(--app-border);
+  --el-border-color-light: var(--app-border-soft);
+  --el-fill-color-blank: var(--app-surface);
+  --el-fill-color-light: var(--app-surface-alt);
+  /* 勿用默认近白 lighter，否则浅色字在斑纹行上消失 */
+  --el-fill-color-lighter: #334155;
+  --el-bg-color: #0f172a;
+  --el-bg-color-page: #1e293b;
+  --el-mask-color: rgba(0, 0, 0, 0.65);
+}
+
+html.app-theme-soft,
+body.app-theme-soft {
+  color: #3f3f46;
+  --el-text-color-placeholder: #71717a;
+  --app-outer-canvas: #f4f4f5;
+  background-color: var(--app-outer-canvas);
+  --app-text: #3f3f46;
+  --app-text-muted: #52525b;
+  --app-border: #d4d4d8;
+  --app-border-soft: #e4e4e7;
+  --app-surface-chrome: 250 245 255;
+  --app-surface-alt-chrome: 250 245 255;
+  --app-surface: rgb(var(--app-surface-chrome) / 0.9);
+  --app-surface-alt: rgb(var(--app-surface-alt-chrome) / 0.9);
+  --app-primary: #6366f1;
+  --app-primary-soft: #ede9fe;
+  --app-primary-soft-chrome: 237 233 254;
+  --app-danger: #dc2626;
+  --el-color-primary: var(--app-primary);
+  --el-color-danger: var(--app-danger);
+  --el-text-color-primary: var(--app-text);
+  --el-text-color-regular: var(--app-text-muted);
+  --el-border-color: var(--app-border);
+  --el-border-color-light: var(--app-border-soft);
+  --el-fill-color-blank: var(--app-surface);
+  --el-fill-color-light: var(--app-surface-alt);
+  --el-fill-color-lighter: #ede9fe;
+  --el-bg-color: #faf5ff;
+  --el-bg-color-page: #f5f3ff;
+  --el-mask-color: rgba(0, 0, 0, 0.45);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+#app {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  background: transparent;
+}
+
+/**
+ * 主壳内衬底透明度由界面设置里的「顶栏与内容面板透明度」控制（--app-chrome-opacity）。
+ * --app-primary-soft 同步乘同一 alpha，否则 el-tree 选中等高亮条仍是不透纯色，与侧栏/卡片脱节。
+ * Teleport 到 body 的弹层仍用 html/body 上的默认变量，避免整块过透难读。
+ */
+#app .app-shell {
+  --app-surface: rgb(var(--app-surface-chrome) / var(--app-chrome-opacity, 0.92));
+  --app-surface-alt: rgb(var(--app-surface-alt-chrome) / var(--app-chrome-opacity, 0.92));
+  --app-primary-soft: rgb(var(--app-primary-soft-chrome) / var(--app-chrome-opacity, 0.92));
+}
+
+.card {
+  margin-top: 12px;
+  padding: 16px;
+  border: 1px solid var(--app-border-soft, #e5e7eb);
+  border-radius: 10px;
+  background: var(--app-surface, #ffffff);
+}
+
+.app-shell .card {
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+
+button {
+  border: 1px solid var(--app-border, #d1d5db);
+  border-radius: 6px;
+  padding: 8px 12px;
+  background: var(--app-surface, #ffffff);
+  color: var(--app-text, #111827);
+  cursor: pointer;
+}
+
+.app-shell .el-card,
+.app-shell .el-table,
+.app-shell .el-dialog,
+.app-shell .el-drawer {
+  background-color: var(--app-surface);
+  color: var(--app-text);
+  border-color: var(--app-border-soft);
+}
+
+.app-shell .el-input__wrapper,
+.app-shell .el-textarea__inner,
+.app-shell .el-select__wrapper {
+  background-color: var(--app-surface-alt);
+  box-shadow: 0 0 0 1px var(--app-border) inset;
+}
+
+.app-shell .el-input__inner,
+.app-shell .el-textarea__inner {
+  color: var(--el-text-color-primary);
+}
+
+.app-shell .el-table th.el-table__cell {
+  background: var(--app-surface-alt);
+}
+
+.app-shell .el-table tr {
+  background: var(--app-surface);
+}
+
+/* 表体单元格统一用主题主字色，避免斑纹行上继承到错误对比色 */
+.app-shell .el-table .el-table__body .el-table__cell {
+  color: var(--el-text-color-primary);
+}
+
+.app-shell .el-button.is-plain {
+  background: var(--app-surface-alt);
+  border-color: var(--app-border);
+  color: var(--app-text);
+}
+
+.page-hero {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid var(--app-border-soft, #e5e7eb);
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--app-surface, #fff) 0%, var(--app-surface-alt, #f8fafc) 100%);
+  position: relative;
+  overflow: hidden;
+}
+
+.app-shell .page-hero {
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+
+.app-shell .settings-page {
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+
+.page-hero::after {
+  content: '';
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 0;
+  height: 3px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--app-primary, #2563eb), transparent);
+}
+
+.page-title {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.2;
+  letter-spacing: 0.2px;
+}
+
+.page-kicker {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--app-primary, #2563eb);
+  background: var(--app-primary-soft, #dbeafe);
+  border: 1px solid color-mix(in srgb, var(--app-primary, #2563eb) 35%, transparent);
+}
+
+.page-subtitle {
+  margin: 0;
+  color: var(--app-text-muted, #4b5563);
+  font-size: 13px;
+}
+
+body.app-theme-light .el-message,
+body.app-theme-light .el-notification {
+  background: var(--el-bg-color);
+  border-color: var(--el-border-color-light);
+  color: var(--el-text-color-primary);
+}
+
+body.app-theme-light .el-popper.is-light,
+body.app-theme-light .el-popper {
+  background: var(--el-bg-color);
+  border-color: var(--el-border-color);
+  color: var(--el-text-color-primary);
+}
+
+body.app-theme-dark .el-message,
+body.app-theme-dark .el-notification {
+  background: var(--el-bg-color);
+  border-color: var(--app-border-soft);
+  color: var(--el-text-color-primary);
+}
+
+body.app-theme-dark .el-popper.is-light,
+body.app-theme-dark .el-popper {
+  background: var(--el-bg-color-page);
+  border-color: var(--el-border-color);
+  color: var(--el-text-color-primary);
+}
+
+body.app-theme-soft .el-message,
+body.app-theme-soft .el-notification {
+  background: var(--el-bg-color);
+  border-color: var(--el-border-color-light);
+  color: var(--el-text-color-primary);
+}
+
+body.app-theme-soft .el-popper.is-light,
+body.app-theme-soft .el-popper {
+  background: var(--el-bg-color);
+  border-color: var(--el-border-color);
+  color: var(--el-text-color-primary);
+}
+
+/* el-select 下拉：选项字色与悬停底随主题，避免深色下系统/默认样式导致浅底白字 */
+body.app-theme-light .el-select-dropdown__item {
+  color: var(--el-text-color-primary);
+}
+
+body.app-theme-light .el-select-dropdown__item.is-hovering {
+  background-color: var(--el-fill-color-light);
+}
+
+body.app-theme-dark .el-select-dropdown {
+  background-color: var(--el-bg-color-page);
+}
+
+body.app-theme-dark .el-select-dropdown__item {
+  color: var(--el-text-color-primary);
+}
+
+body.app-theme-dark .el-select-dropdown__item.is-hovering {
+  background-color: var(--el-fill-color-light);
+}
+
+body.app-theme-dark .el-select-dropdown__item.is-selected {
+  color: var(--el-color-primary);
+}
+
+body.app-theme-soft .el-select-dropdown__item {
+  color: var(--el-text-color-primary);
+}
+
+body.app-theme-soft .el-select-dropdown__item.is-hovering {
+  background-color: var(--el-fill-color-light);
+}
+
+/* MessageBox / Dialog / Drawer（Teleport 到 body） */
+body.app-theme-light .el-message-box,
+body.app-theme-light .el-dialog,
+body.app-theme-light .el-drawer {
+  --el-messagebox-title-color: var(--el-text-color-primary);
+}
+
+body.app-theme-dark .el-message-box,
+body.app-theme-dark .el-dialog,
+body.app-theme-dark .el-drawer {
+  --el-messagebox-title-color: var(--el-text-color-primary);
+}
+
+body.app-theme-soft .el-message-box,
+body.app-theme-soft .el-dialog,
+body.app-theme-soft .el-drawer {
+  --el-messagebox-title-color: var(--el-text-color-primary);
+}
+
