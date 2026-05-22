@@ -1,0 +1,51 @@
+{
+  "name": "wengu-zhixuewang",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:api": "npm run start --prefix server",
+    "dev:all": "concurrently -k \"npm run dev\" \"npm run dev:api\"",
+    "install:server": "npm install --prefix server",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview",
+    "type-check": "vue-tsc --noEmit",
+    "lint": "eslint . --ext .ts,.vue",
+    "lint:fix": "eslint . --ext .ts,.vue --fix",
+    "format": "prettier . --write",
+    "format:check": "prettier . --check"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@vitejs/plugin-vue": "^6.0.6",
+    "concurrently": "^9.2.1",
+    "eslint": "^10.2.1",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-vue": "^10.9.0",
+    "globals": "^17.5.0",
+    "prettier": "^3.8.3",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.59.1",
+    "vite": "^8.0.10",
+    "vue-eslint-parser": "^10.4.0",
+    "vue-tsc": "^3.2.7"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.2",
+    "@vueup/vue-quill": "^1.2.0",
+    "dexie": "^4.4.2",
+    "dompurify": "^3.4.1",
+    "echarts": "^6.0.0",
+    "element-plus": "^2.13.7",
+    "marked": "^18.0.2",
+    "markmap-common": "^0.18.9",
+    "markmap-lib": "^0.18.12",
+    "markmap-view": "^0.18.12",
+    "pinia": "^3.0.4",
+    "quill": "^2.0.3",
+    "quill-blot-formatter": "^1.0.5",
+    "vue": "^3.5.33",
+    "vue-router": "^4.6.3"
+  }
+}
