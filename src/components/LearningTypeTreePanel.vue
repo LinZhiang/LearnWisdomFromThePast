@@ -164,7 +164,7 @@ watch(
                   data.children.length === 0 &&
                   perfectClearedIds.includes(data.id)
                 "
-                class="perfect-cleared-node-tag"
+                class="perfect-cleared-tag"
                 type="success"
                 size="small"
                 effect="plain"
@@ -299,7 +299,7 @@ watch(
   color: var(--app-text);
 }
 
-.perfect-cleared-node-tag {
+.perfect-cleared-tag {
   flex-shrink: 0;
 }
 

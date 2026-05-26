@@ -109,20 +109,36 @@ export const RANK_LIST: RankTier[] = [
   { score: 100000, rank: 19, wenguan: '文帝', wuguan: '武帝' },
 ]
 
+/** 根据累计分数解析当前文职品阶档位（rank 字段，非名次） */
+export function resolveWenRankLevel(score: number): number {
+  let level = RANK_LIST[0].rank
+  for (const row of RANK_LIST) {
+    if (score >= row.score) level = row.rank
+  }
+  return level
+}
+
+/** 根据累计分数解析当前武职品阶档位 */
+export function resolveWuRankLevel(score: number): number {
+  let level = RANK_LIST[0].rank
+  for (const row of RANK_LIST) {
+    if (score >= row.score) level = row.rank
+  }
+  return level
+}
+
+export function titleForRankLevel(level: number, axis: 'wen' | 'wu'): string {
+  const row = RANK_LIST.find((r) => r.rank === level)
+  if (!row) return axis === 'wen' ? RANK_LIST[0].wenguan : RANK_LIST[0].wuguan
+  return axis === 'wen' ? row.wenguan : row.wuguan
+}
+
 /** 根据累计分数解析当前文职品阶名 */
 export function resolveWenTitle(score: number): string {
-  let t = RANK_LIST[0].wenguan
-  for (const row of RANK_LIST) {
-    if (score >= row.score) t = row.wenguan
-  }
-  return t
+  return titleForRankLevel(resolveWenRankLevel(score), 'wen')
 }
 
 /** 根据累计分数解析当前武职品阶名 */
 export function resolveWuTitle(score: number): string {
-  let t = RANK_LIST[0].wuguan
-  for (const row of RANK_LIST) {
-    if (score >= row.score) t = row.wuguan
-  }
-  return t
+  return titleForRankLevel(resolveWuRankLevel(score), 'wu')
 }

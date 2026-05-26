@@ -11,6 +11,8 @@
 | 变量名 | 必填 | 说明 |
 |--------|------|------|
 | `VITE_AI_API_BASE` | 生产必填 | AI 代理的 **OpenAI 兼容前缀**，需以 `/v1` 结尾、无尾部斜杠。例如：`https://api.你的域名.com/v1` 或本地 `http://127.0.0.1:8787/v1`。 |
+| `VITE_DEEPSEEK_MODEL_DEFAULT` | 否 | 默认模型（Flash 档），用于测验干扰项、解答、雷达等。默认 `deepseek-v4-flash`。 |
+| `VITE_DEEPSEEK_MODEL_HEAVY` | 否 | 长文生成模型（Pro 档），用于思维导图、资料讲义。默认 `deepseek-v4-pro`。 |
 | （开发可选） | — | 开发时若不设置 `VITE_AI_API_BASE`，请求会走 Vite 代理路径 `/api/ai/...`，转发到本机 `server`（默认端口见下）。 |
 
 **已废弃（请删除）**
@@ -35,6 +37,17 @@
 | `PORT` | 否 | 监听端口，默认 `8787`。 |
 | `CORS_ORIGIN` | 生产强烈建议 | 允许访问本代理的**前端源**，多个用英文逗号分隔，如 `https://你的站点.com`。不填时开发方便但生产易被滥用，请尽量填写。 |
 
+### API Key 与账单拆分（强烈建议）
+
+在 [DeepSeek 控制台](https://platform.deepseek.com) **为本 App 单独创建一枚 API Key**，写入 `server/.env` 的 `DEEPSEEK_API_KEY`。**不要**与 Cursor、其它脚本共用同一 Key，否则账单里 `v4-pro` / `v4-flash` 无法区分来源。
+
+本 App 请求会携带请求头 `X-Wengu-Ai-Source: wengu-learning-app`；代理日志会输出 `model=` 与 `source=`，便于对照控制台明细。
+
+| 场景 | 默认模型 |
+|------|----------|
+| 思维导图、资料讲义 | `deepseek-v4-pro`（可通过 `VITE_DEEPSEEK_MODEL_HEAVY` 改） |
+| 测验干扰项、导图小题、解答、雷达等 | `deepseek-v4-flash`（可通过 `VITE_DEEPSEEK_MODEL_DEFAULT` 改） |
+
 ---
 
 ## 三、本地联调步骤
@@ -58,3 +71,17 @@
 ## 五、健康检查
 
 代理提供 `GET /health`，返回 JSON（含 `hasApiKey` 等，**不包含**密钥），可用于运维探活。
+
+### AI 代理一键体检
+
+项目根目录执行：
+
+```bash
+npm run check:ai
+```
+
+或在 Cursor 里直接说：**「看看 AI 代理情况」**，助手会运行上述命令并解读结果。
+
+脚本会检查：代理是否在线、Key 是否配置、最近 50 次请求的 **模型 / 来源 / tokens** 汇总。本 App 的请求带来源 `wengu-learning-app`；若 DeepSeek 账单里 v4-pro 远高于此处 Pro 次数，多半是 **Cursor 等与 App 共用了同一 Key**。
+
+详细请求日志（JSON Lines）写在 `server/logs/ai-requests.log`（已 gitignore，仅本机保留）。

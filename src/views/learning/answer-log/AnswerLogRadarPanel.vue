@@ -7,6 +7,7 @@ import type { ComponentPublicInstance } from 'vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { QuizRadarDimension } from '@/services/deepseek'
 import { isAiChatConfigured, requestQuizRadarAnalysis } from '@/services/deepseek'
+import { hashForAiCache, rememberAiResponse } from '@/utils/aiResponseCache'
 
 const props = defineProps<{
   learningTypeName: string
@@ -118,12 +119,23 @@ async function loadQuizRadarAnalysis() {
   }
   radarLoading.value = true
   try {
-    const res = await requestQuizRadarAnalysis({
-      learningTypeName: props.learningTypeName,
-      totalScore: Math.round(props.totalScore * 100) / 100,
-      totalMax: Math.round(props.totalMax * 100) / 100,
-      resultLines: props.resultLines,
-    })
+    const res = await rememberAiResponse(
+      `quiz-radar:${hashForAiCache(
+        [
+          props.learningTypeName,
+          String(props.totalScore),
+          String(props.totalMax),
+          props.resultLines,
+        ].join('\0'),
+      )}`,
+      () =>
+        requestQuizRadarAnalysis({
+          learningTypeName: props.learningTypeName,
+          totalScore: Math.round(props.totalScore * 100) / 100,
+          totalMax: Math.round(props.totalMax * 100) / 100,
+          resultLines: props.resultLines,
+        }),
+    )
     radarDimensions.value = res.dimensions
     radarAnalysisMd.value = res.analysisMd
   } catch (e) {

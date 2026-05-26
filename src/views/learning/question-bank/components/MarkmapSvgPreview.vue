@@ -147,4 +147,10 @@ defineExpose({ draw })
   text-shadow: none;
   -webkit-text-stroke: 0 transparent;
 }
+
+/* 浅色主题：加粗词用主题色突出，避免与正文混在一起 */
+.markmap-preview-box:not(.markmap-dark) :deep(.markmap-foreign strong) {
+  font-weight: 700;
+  color: var(--el-color-primary, #2563eb);
+}
 </style>

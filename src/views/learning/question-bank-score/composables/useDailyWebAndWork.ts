@@ -3,8 +3,13 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { DailyWebUsage, WorkTimeLog } from '@/db/models'
 import { workTimeLogService } from '@/services/data-services'
 import { getDailyUsageByDateKey, listDailyUsageNewestFirst, localDateKey } from '@/services/daily-web-usage'
+import { syncDailyStudyWorkMoneyBonus } from '@/services/money-rule-auto'
 import { applyWorkTimeLogWenWuBonus } from '@/services/work-time-wen-wu-bonus'
-import { formatSecondsAsZh } from '@/utils/formatDuration'
+import {
+  durationHoursToMinutes,
+  formatSecondsAsZh,
+  parseDurationHours,
+} from '@/utils/formatDuration'
 
 export function useDailyWebAndWork() {
   const todayKey = localDateKey()
@@ -13,7 +18,7 @@ export function useDailyWebAndWork() {
   const workHistory = ref<WorkTimeLog[]>([])
 
   const workDateKey = ref(todayKey)
-  const workMinutes = ref<number | undefined>(60)
+  const workHours = ref<number | undefined>(1)
   const workKind = ref<'work' | 'trip'>('work')
   const workNote = ref('')
   const submittingWork = ref(false)
@@ -37,6 +42,10 @@ export function useDailyWebAndWork() {
         `累计工作/出差登记已满 ${hours} 小时，文分 +${hours * 12}，武分 +${hours * 14}（与「我的文武累计分」同源）。`,
       )
     }
+    const moneyBonus = await syncDailyStudyWorkMoneyBonus()
+    if (moneyBonus.granted) {
+      ElMessage.success('今日工作/学习达标，已自动奖励 10 元（金钱累计）。')
+    }
   }
 
   const refreshAll = async () => {
@@ -52,22 +61,22 @@ export function useDailyWebAndWork() {
       ElMessage.warning('请选择日期。')
       return
     }
-    const m = Number(workMinutes.value)
-    if (!Number.isFinite(m) || m < 1 || m > 24 * 60) {
-      ElMessage.warning('请填写 1～1440 之间的整数分钟。')
+    const hours = parseDurationHours(workHours.value)
+    if (hours == null) {
+      ElMessage.warning('请填写 0.5～24 之间、且为 0.5 整数倍的小时数。')
       return
     }
     submittingWork.value = true
     try {
       await workTimeLogService.create({
         dateKey: dk,
-        minutes: Math.round(m),
+        minutes: durationHoursToMinutes(hours),
         kind: workKind.value,
         note: workNote.value.trim() || undefined,
         createdAt: new Date().toISOString(),
       })
       ElMessage.success('已记录本条工作时间。')
-      workMinutes.value = 60
+      workHours.value = 1
       workNote.value = ''
       await loadHistory()
     } catch {
@@ -97,7 +106,7 @@ export function useDailyWebAndWork() {
     dailyHistory,
     workHistory,
     workDateKey,
-    workMinutes,
+    workHours,
     workKind,
     workNote,
     submittingWork,

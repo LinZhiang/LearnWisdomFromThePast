@@ -3,7 +3,7 @@ import type { ExerciseTimeLog } from '@/db/models'
 
 defineProps<{
   exerciseDateKey: string
-  exerciseMinutes: number | undefined
+  exerciseHours: number | undefined
   exerciseKind: ExerciseTimeLog['kind']
   exerciseNote: string
   submitting: boolean
@@ -11,7 +11,7 @@ defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:exerciseDateKey', v: string): void
-  (e: 'update:exerciseMinutes', v: number | undefined): void
+  (e: 'update:exerciseHours', v: number | undefined): void
   (e: 'update:exerciseKind', v: ExerciseTimeLog['kind']): void
   (e: 'update:exerciseNote', v: string): void
   (e: 'submit'): void
@@ -22,9 +22,9 @@ const emit = defineEmits<{
   <div class="score-section">
     <h3 class="score-section-title">锻炼时间登记</h3>
     <p class="score-muted">
-      请填写<strong>本次</strong>锻炼时长并选择强度后提交；可多次添加。规则：<strong>一般运动</strong>累计每满
-      <strong>30 分钟</strong>为<strong>武分 +30</strong>；<strong>剧烈运动</strong>累计每满
-      <strong>30 分钟</strong>为<strong>武分 +90</strong>（余数滚入下次，与「我的文武累计分」同源）。
+      请填写<strong>本次</strong>锻炼时长（小时，最小 0.5）并选择强度后提交；可多次添加。规则：<strong>一般运动</strong>累计每满
+      <strong>0.5 小时</strong>为<strong>武分 +30</strong>；<strong>剧烈运动</strong>累计每满
+      <strong>0.5 小时</strong>为<strong>武分 +90</strong>（余数滚入下次，与「我的文武累计分」同源）。
     </p>
     <div class="score-work-form">
       <label class="score-field">
@@ -39,15 +39,16 @@ const emit = defineEmits<{
         />
       </label>
       <label class="score-field">
-        <span>时长（分钟）</span>
+        <span>时长（小时）</span>
         <el-input-number
-          :model-value="exerciseMinutes"
-          :min="1"
-          :max="1440"
-          :step="5"
+          :model-value="exerciseHours"
+          :min="0.5"
+          :max="24"
+          :step="0.5"
+          :precision="1"
           controls-position="right"
           style="width: 100%"
-          @update:model-value="emit('update:exerciseMinutes', $event)"
+          @update:model-value="emit('update:exerciseHours', $event)"
         />
       </label>
       <div class="score-field score-field--inline">

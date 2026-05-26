@@ -1,5 +1,6 @@
 import { onBeforeUnmount, onMounted } from 'vue'
 import { bumpDailyActiveSeconds, localDateKey } from '@/services/daily-web-usage'
+import { syncDailyStudyWorkMoneyBonus } from '@/services/money-rule-auto'
 import { applyWenBonusForVisibleSeconds } from '@/services/wen-bonus-from-visible-time'
 
 /**
@@ -20,7 +21,9 @@ export function useWebUsageTracker() {
     const nowMs = Date.now()
     const secs = Math.floor((nowMs - visibleSinceMs) / 1000)
     if (secs < 1) return
-    void bumpDailyActiveSeconds(localDateKey(), secs)
+    void bumpDailyActiveSeconds(localDateKey(), secs).then(() =>
+      syncDailyStudyWorkMoneyBonus(),
+    )
     applyWenBonusForVisibleSeconds(secs)
     visibleSinceMs = Date.now()
   }
@@ -33,7 +36,9 @@ export function useWebUsageTracker() {
         const secs = Math.floor((Date.now() - visibleSinceMs) / 1000)
         visibleSinceMs = null
         if (secs >= 1) {
-          void bumpDailyActiveSeconds(localDateKey(), secs)
+          void bumpDailyActiveSeconds(localDateKey(), secs).then(() =>
+            syncDailyStudyWorkMoneyBonus(),
+          )
           applyWenBonusForVisibleSeconds(secs)
         }
       }
@@ -45,7 +50,9 @@ export function useWebUsageTracker() {
     const secs = Math.floor((Date.now() - visibleSinceMs) / 1000)
     visibleSinceMs = null
     if (secs >= 1) {
-      void bumpDailyActiveSeconds(localDateKey(), secs)
+      void bumpDailyActiveSeconds(localDateKey(), secs).then(() =>
+        syncDailyStudyWorkMoneyBonus(),
+      )
       applyWenBonusForVisibleSeconds(secs)
     }
   }

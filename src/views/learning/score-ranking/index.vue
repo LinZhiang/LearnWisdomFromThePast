@@ -108,7 +108,15 @@ const selfWuRow = computed(() => wuTable.value.find((r) => r.isSelf))
             :row-class-name="rowClassName"
           >
             <el-table-column prop="rank" label="排名" width="72" align="center" />
-            <el-table-column prop="name" label="姓名" min-width="100" />
+            <el-table-column prop="name" label="姓名" min-width="100">
+              <template #default="{ row }">
+                <span v-if="row.isSelf" class="rank-self-name-cell">
+                  <span class="rank-self-tag">当前</span>
+                  <span>{{ row.name }}</span>
+                </span>
+                <span v-else>{{ row.name }}</span>
+              </template>
+            </el-table-column>
             <el-table-column prop="wenScore" label="文分" width="100" align="right" />
             <el-table-column label="文职品阶" min-width="120" show-overflow-tooltip>
               <template #default="{ row }">
@@ -131,7 +139,15 @@ const selfWuRow = computed(() => wuTable.value.find((r) => r.isSelf))
             :row-class-name="rowClassName"
           >
             <el-table-column prop="rank" label="排名" width="72" align="center" />
-            <el-table-column prop="name" label="姓名" min-width="100" />
+            <el-table-column prop="name" label="姓名" min-width="100">
+              <template #default="{ row }">
+                <span v-if="row.isSelf" class="rank-self-name-cell">
+                  <span class="rank-self-tag">当前</span>
+                  <span>{{ row.name }}</span>
+                </span>
+                <span v-else>{{ row.name }}</span>
+              </template>
+            </el-table-column>
             <el-table-column prop="wuScore" label="武分" width="100" align="right" />
             <el-table-column label="武职品阶" min-width="120" show-overflow-tooltip>
               <template #default="{ row }">
@@ -286,13 +302,81 @@ const selfWuRow = computed(() => wuTable.value.find((r) => r.isSelf))
 </style>
 
 <style>
-/* el-table 行类名挂在表格内部，需非 scoped */
-.rank-el-table .rank-row-self > td {
-  background-color: var(--app-primary-soft, #dbeafe) !important;
-  font-weight: 600;
+/* 斑纹行背景调淡，避免与「我」的高亮抢视觉 */
+.rank-el-table.el-table--striped
+  .el-table__body
+  tr.el-table__row--striped:not(.rank-row-self):not(.rank-row-fixed)
+  > td.el-table__cell {
+  background-color: color-mix(
+    in srgb,
+    var(--app-text-muted, #64748b) 4%,
+    var(--app-surface, #fff)
+  ) !important;
 }
 
-.rank-el-table .rank-row-fixed > td {
-  background-color: rgba(250, 204, 21, 0.12) !important;
+.rank-el-table
+  .el-table__body
+  tr:not(.rank-row-self):not(.rank-row-fixed):hover
+  > td.el-table__cell {
+  background-color: color-mix(
+    in srgb,
+    var(--app-text-muted, #64748b) 7%,
+    var(--app-surface, #fff)
+  ) !important;
+}
+
+/* el-table 行类名挂在表格内部，需非 scoped；须高于 stripe / hover 默认样式 */
+.rank-el-table.el-table--striped .el-table__body tr.rank-row-self > td.el-table__cell,
+.rank-el-table .el-table__body tr.rank-row-self > td.el-table__cell {
+  background: color-mix(
+    in srgb,
+    var(--app-primary, #2563eb) 26%,
+    var(--app-surface, #fff)
+  ) !important;
+  font-weight: 650;
+  color: var(--app-text);
+  border-top: 2px solid color-mix(in srgb, var(--app-primary, #2563eb) 55%, transparent) !important;
+  border-bottom: 2px solid color-mix(in srgb, var(--app-primary, #2563eb) 55%, transparent) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--app-primary, #2563eb) 35%, transparent);
+}
+
+.rank-el-table .el-table__body tr.rank-row-self > td.el-table__cell:first-child {
+  box-shadow:
+    inset 5px 0 0 var(--app-primary, #2563eb),
+    inset 0 0 0 1px color-mix(in srgb, var(--app-primary, #2563eb) 35%, transparent);
+}
+
+.rank-el-table .el-table__body tr.rank-row-self:hover > td.el-table__cell {
+  background: color-mix(
+    in srgb,
+    var(--app-primary, #2563eb) 34%,
+    var(--app-surface, #fff)
+  ) !important;
+}
+
+.rank-el-table .rank-self-name-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+  color: var(--app-primary, #2563eb);
+}
+
+.rank-el-table .rank-self-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: 0.04em;
+  color: #fff;
+  background: var(--app-primary, #2563eb);
+  white-space: nowrap;
+}
+
+.rank-el-table .rank-row-fixed > td.el-table__cell {
+  background-color: rgba(250, 204, 21, 0.14) !important;
 }
 </style>

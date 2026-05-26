@@ -17,6 +17,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
+      'jazz-midi': fileURLToPath(new URL('./src/utils/jazz-midi-stub.ts', import.meta.url)),
     },
   },
 })

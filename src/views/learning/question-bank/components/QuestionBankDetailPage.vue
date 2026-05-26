@@ -64,6 +64,7 @@ onUnmounted(() => {
         class="detail-column-aside"
         :question="question"
         :type-label="typeLabel"
+        :fill-height="isMindmap"
       />
     </div>
   </section>
@@ -117,6 +118,11 @@ onUnmounted(() => {
   width: 100%;
 }
 
+.question-detail-page.is-mindmap-detail .detail-column-aside :deep(.keyword-panel) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 @media (max-width: 900px) {
   .detail-page-columns {
     flex-direction: column;
@@ -148,9 +154,11 @@ onUnmounted(() => {
 
 .question-detail-page.is-mindmap-detail .detail-column-aside {
   align-self: stretch;
+  display: flex;
+  flex-direction: column;
   max-height: 100%;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
 }
 
 .question-detail-page.is-mindmap-detail :deep(.detail-topbar) {

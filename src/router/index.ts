@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import AnswerLogView from '@/views/learning/answer-log/index.vue'
 import LearningTypeEditView from '@/views/learning/learning-type-edit/index.vue'
 import QuestionBankFavoriteView from '@/views/learning/question-bank-favorite/index.vue'
+import MoneySpendView from '@/views/learning/money-spend/index.vue'
 import QuestionBankScoreView from '@/views/learning/question-bank-score/index.vue'
 import WenWuRankView from '@/views/learning/question-bank-score/WenWuRankView.vue'
 import QuestionBankView from '@/views/learning/question-bank/index.vue'
@@ -9,6 +10,7 @@ import ScoreRankingView from '@/views/learning/score-ranking/index.vue'
 import SettingsView from '@/views/settings/index.vue'
 import WrongBookView from '@/views/learning/wrong-book/index.vue'
 import MindmapViewerView from '@/views/tools/mindmap-viewer/index.vue'
+import MaterialOrganizeView from '@/views/tools/material-organize/index.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -36,6 +38,11 @@ const router = createRouter({
       path: '/learning/question-bank-score',
       name: 'question-bank-score',
       component: QuestionBankScoreView,
+    },
+    {
+      path: '/learning/money-spend',
+      name: 'money-spend',
+      component: MoneySpendView,
     },
     {
       path: '/learning/wen-wu-rank',
@@ -66,6 +73,11 @@ const router = createRouter({
       path: '/tools/mindmap-viewer',
       name: 'mindmap-viewer',
       component: MindmapViewerView,
+    },
+    {
+      path: '/tools/material-organize',
+      name: 'material-organize',
+      component: MaterialOrganizeView,
     },
   ],
 })

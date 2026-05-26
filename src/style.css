@@ -366,3 +366,13 @@ body.app-theme-soft .el-drawer {
   --el-messagebox-title-color: var(--el-text-color-primary);
 }
 
+/* 学习题库：树节点「全对」与右侧「题库全对」统一为 success 浅底标签（树内 --el-fill-color-blank: transparent 会冲掉默认底） */
+.perfect-cleared-tag.el-tag.el-tag--success.el-tag--plain {
+  --el-tag-bg-color: var(--el-color-success-light-9);
+  --el-tag-border-color: var(--el-color-success-light-5);
+  --el-tag-text-color: var(--el-color-success);
+  background-color: var(--el-color-success-light-9);
+  border-color: var(--el-color-success-light-5);
+  color: var(--el-color-success);
+}
+

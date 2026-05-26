@@ -25,16 +25,22 @@ type LearningTypeNode = LearningType & {
   children: LearningTypeNode[]
 }
 
+export type WrongBookSortField = 'wrongCount' | 'reviewStage'
+
 export function useWrongBookPage() {
-  const ONLY_DUE_KEY = 'wrong-book-only-due'
+  const ONLY_DUE_KEY = 'wrong-book-only-due-v2'
+  const ONLY_DUE_KEY_LEGACY = 'wrong-book-only-due'
   const SELECTED_LT_KEY = 'wrong-book-selected-learning-type-id'
-  const readBool = (key: string, fallback: boolean) => {
+  /** 进入错题本默认「仅看到期」；仅当用户在本页手动切换后才写入 v2 偏好 */
+  const readOnlyDueDefault = (): boolean => {
     try {
-      const v = window.localStorage.getItem(key)
-      if (v == null) return fallback
-      return v === '1'
+      const v = window.localStorage.getItem(ONLY_DUE_KEY)
+      if (v != null) return v === '1'
+      // 旧键曾长期默认「全部」(0)，升级后不再沿用，统一默认仅看到期
+      window.localStorage.removeItem(ONLY_DUE_KEY_LEGACY)
+      return true
     } catch {
-      return fallback
+      return true
     }
   }
   const readNullableNumber = (key: string): number | null => {
@@ -53,7 +59,7 @@ export function useWrongBookPage() {
   const selectedLearningTypeId = ref<number | null>(readNullableNumber(SELECTED_LT_KEY))
   const loading = ref(false)
   const message = ref('')
-  const onlyDue = ref(readBool(ONLY_DUE_KEY, false))
+  const onlyDue = ref(readOnlyDueDefault())
   const backfilling = ref(false)
   const backfillWithinDays = ref(30)
   const currentPage = ref(1)
@@ -74,6 +80,10 @@ export function useWrongBookPage() {
    * 避免打开详情后复习时间更新、列表重排导致题标与上一题/下一题错位。
    */
   const detailNavOrderIds = ref<number[]>([])
+
+  /** 错题列表排序：默认按下次复习时间；可切换错误次数 / 复习轮次升序或降序 */
+  const wrongBookSortField = ref<WrongBookSortField | null>(null)
+  const wrongBookSortOrder = ref<'asc' | 'desc'>('asc')
 
   const typeTextMap: Record<QuestionBank['type'], string> = {
     general: '一般题型',
@@ -127,7 +137,18 @@ export function useWrongBookPage() {
     if (onlyDue.value) {
       rows = rows.filter((r) => new Date(r.nextReviewAt).getTime() <= nowMs)
     }
-    return rows.sort((a, b) => new Date(a.nextReviewAt).getTime() - new Date(b.nextReviewAt).getTime())
+    const field = wrongBookSortField.value
+    const order = wrongBookSortOrder.value
+    return rows.sort((a, b) => {
+      if (field === 'wrongCount') {
+        const diff = (a.wrongCount ?? 0) - (b.wrongCount ?? 0)
+        if (diff !== 0) return order === 'asc' ? diff : -diff
+      } else if (field === 'reviewStage') {
+        const diff = (a.reviewStage ?? 0) - (b.reviewStage ?? 0)
+        if (diff !== 0) return order === 'asc' ? diff : -diff
+      }
+      return new Date(a.nextReviewAt).getTime() - new Date(b.nextReviewAt).getTime()
+    })
   })
 
   /** 当前筛选下可组卷的题库原题（导图衍生小题走 presetUnits，不重复放此列表） */
@@ -275,6 +296,32 @@ export function useWrongBookPage() {
   const rowDueTag = (row: WrongQuestion) => {
     const due = new Date(row.nextReviewAt).getTime()
     return due <= Date.now() ? '应复习' : '待安排'
+  }
+
+  const toggleWrongBookSort = (field: WrongBookSortField) => {
+    if (wrongBookSortField.value === field) {
+      if (wrongBookSortOrder.value === 'asc') {
+        wrongBookSortOrder.value = 'desc'
+      } else {
+        wrongBookSortField.value = null
+        wrongBookSortOrder.value = 'asc'
+      }
+    } else {
+      wrongBookSortField.value = field
+      wrongBookSortOrder.value = 'asc'
+    }
+    currentPage.value = 1
+  }
+
+  const wrongBookSortIndicator = (field: WrongBookSortField) => {
+    if (wrongBookSortField.value !== field) return '↕'
+    return wrongBookSortOrder.value === 'asc' ? '↑' : '↓'
+  }
+
+  const wrongBookSortAriaLabel = (field: WrongBookSortField, label: string) => {
+    if (wrongBookSortField.value !== field) return `${label}，点击排序`
+    const dir = wrongBookSortOrder.value === 'asc' ? '升序' : '降序'
+    return `${label}，当前${dir}，再次点击切换`
   }
 
   const captureWrongBookDetailNavSnapshot = () => {
@@ -660,6 +707,9 @@ export function useWrongBookPage() {
     rowReviewStageLabel,
     formatTime,
     rowDueTag,
+    toggleWrongBookSort,
+    wrongBookSortIndicator,
+    wrongBookSortAriaLabel,
     openRow,
     closeDetail,
     wrongBookDetailSurfaceOpen,

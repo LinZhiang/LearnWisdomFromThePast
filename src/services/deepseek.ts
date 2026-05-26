@@ -1,4 +1,10 @@
 import { htmlToPlainText } from '@/utils/htmlToText'
+import {
+  extractImagesFromRichHtml,
+  getMaxMaterialImages,
+  richHtmlToPlainTextOnly,
+} from '@/utils/richMaterialImages'
+import { MATERIAL_LECTURE_USER_GOAL, ocrImagesLocally } from '@/utils/localImageOcr'
 
 export type MindmapDerivedMcq = {
   stem: string
@@ -15,6 +21,38 @@ function stripJsonFence(text: string): string {
   return t.trim()
 }
 
+/** 命题比对用：去空白、去 markdown 加粗与常见引号 */
+function normalizeMcqCompareText(text: string): string {
+  return text
+    .replace(/\*\*/g, '')
+    .replace(/[「」""''《》]/g, '')
+    .replace(/\s+/g, '')
+}
+
+function splitMcqAnswerSegments(text: string): string[] {
+  return text
+    .split(/[、，,;；/／]+/)
+    .map((s) => normalizeMcqCompareText(s))
+    .filter((s) => s.length >= 2)
+}
+
+/** 题干是否已包含正确选项原文（或其主要片段），导致“看题干就能选对” */
+export function mcqStemLeaksAnswer(stem: string, correct: string[]): boolean {
+  const normStem = normalizeMcqCompareText(stem)
+  if (!normStem) return false
+  for (const ans of correct) {
+    const normAns = normalizeMcqCompareText(ans)
+    if (!normAns) continue
+    if (normAns.length >= 4 && normStem.includes(normAns)) return true
+    const segments = splitMcqAnswerSegments(ans)
+    if (segments.length >= 2) {
+      const hitCount = segments.filter((seg) => seg.length >= 3 && normStem.includes(seg)).length
+      if (hitCount >= 2) return true
+    }
+  }
+  return false
+}
+
 /** DeepSeek 偶发用 markdown 围栏包裹导图正文，需去掉后再交给 markmap */
 function stripMindmapMarkdownFence(text: string): string {
   let t = text.trim()
@@ -25,41 +63,273 @@ function stripMindmapMarkdownFence(text: string): string {
 }
 
 const MINDMAP_SOURCE_TEXT_MAX = 18_000
+const LECTURE_MATERIAL_MAX = 18_000
+
+/** 默认 Flash（测验辅助、干扰项等）；可通过 VITE_DEEPSEEK_MODEL_DEFAULT 覆盖 */
+export const DEEPSEEK_MODEL_DEFAULT =
+  import.meta.env.VITE_DEEPSEEK_MODEL_DEFAULT?.trim() || 'deepseek-v4-flash'
+
+/** 长文生成（思维导图、资料讲义）；可通过 VITE_DEEPSEEK_MODEL_HEAVY 覆盖 */
+export const DEEPSEEK_MODEL_HEAVY =
+  import.meta.env.VITE_DEEPSEEK_MODEL_HEAVY?.trim() || 'deepseek-v4-pro'
+
+const WENGU_AI_SOURCE = 'wengu-learning-app'
+
+type ChatMessage = {
+  role: 'system' | 'user' | 'assistant'
+  content: string
+}
+
+function parseAssistantContent(content: unknown): string {
+  if (typeof content === 'string') return content.trim()
+  return ''
+}
+
+/** 将代理/上游返回的错误体转成可读中文（避免直接展示整段 JSON） */
+function formatDeepSeekFetchError(status: number, errText: string): string {
+  let upstreamMsg = ''
+  try {
+    const parsed = JSON.parse(errText) as { error?: { message?: string; type?: string } }
+    upstreamMsg = String(parsed.error?.message ?? '').trim()
+  } catch {
+    upstreamMsg = errText.trim().slice(0, 200)
+  }
+
+  if (status === 402 || /insufficient balance/i.test(upstreamMsg)) {
+    return 'DeepSeek 账户余额不足（402）：请在 https://platform.deepseek.com 充值或更换有余额的 API Key，并更新 server/.env 中的 DEEPSEEK_API_KEY。'
+  }
+  if (status === 401 || /invalid.*api.*key|authentication/i.test(upstreamMsg)) {
+    return 'DeepSeek API Key 无效或未授权（401）：请检查 server/.env 中的 DEEPSEEK_API_KEY 是否正确。'
+  }
+  if (status === 503) {
+    return upstreamMsg.includes('DEEPSEEK_API_KEY')
+      ? '本地 AI 代理未配置密钥：请在 server/.env 填写 DEEPSEEK_API_KEY 并运行 npm run dev:api。'
+      : `AI 服务暂不可用（503）${upstreamMsg ? `：${upstreamMsg}` : ''}`
+  }
+  if (status === 502) {
+    return `无法连接 DeepSeek 上游（502）${upstreamMsg ? `：${upstreamMsg}` : '，请检查网络或代理服务是否在运行。'}`
+  }
+  return `DeepSeek 请求失败（${status}）${upstreamMsg ? `：${upstreamMsg}` : errText ? `：${errText.slice(0, 120)}` : ''}`
+}
+
+async function deepseekChatCompletion(
+  messages: ChatMessage[],
+  options?: { model?: string; temperature?: number; maxTokens?: number },
+): Promise<string> {
+  const url = chatCompletionsUrl()
+  if (!url) {
+    throw new Error(
+      '未配置 AI 代理地址：生产构建请设置 VITE_AI_API_BASE（见 docs/ENV-说明.md）',
+    )
+  }
+  const body: Record<string, unknown> = {
+    model: options?.model ?? DEEPSEEK_MODEL_DEFAULT,
+    messages,
+    temperature: options?.temperature ?? 0.35,
+  }
+  if (options?.maxTokens != null && options.maxTokens > 0) {
+    body.max_tokens = options.maxTokens
+  }
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Wengu-Ai-Source': WENGU_AI_SOURCE,
+    },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const errText = await res.text()
+    throw new Error(formatDeepSeekFetchError(res.status, errText))
+  }
+  const data = (await res.json()) as {
+    choices?: Array<{ message?: { content?: unknown } }>
+  }
+  const text = parseAssistantContent(data.choices?.[0]?.message?.content)
+  if (!text) throw new Error('DeepSeek 未返回有效内容')
+  return text
+}
+
+export type LectureNotesProgress = (message: string) => void
+
+/**
+ * 资料整理：识别富文本中的图片文字 + 用户文字，整理为带加粗重点的讲义 Markdown。
+ */
+export async function requestLectureNotesFromMaterial(
+  sourceHtml: string,
+  options?: { onProgress?: LectureNotesProgress },
+): Promise<string> {
+  const images = extractImagesFromRichHtml(sourceHtml)
+  const textOnly = richHtmlToPlainTextOnly(sourceHtml)
+
+  if (images.length >= getMaxMaterialImages()) {
+    options?.onProgress?.(`图片较多，仅处理前 ${getMaxMaterialImages()} 张…`)
+  }
+
+  let imageOcrText = ''
+  if (images.length > 0) {
+    options?.onProgress?.(`共 ${images.length} 张图片，正在本地识别文字（首次会加载字库）…`)
+    imageOcrText = await ocrImagesLocally(images, options?.onProgress)
+  }
+
+  if (!textOnly.trim() && !imageOcrText.trim()) {
+    throw new Error('请先在左侧粘贴文字或图片（Ctrl+V 粘贴截图）')
+  }
+
+  const chunks: string[] = []
+  if (textOnly.trim()) chunks.push(`【用户输入的文字】\n${textOnly}`)
+  if (imageOcrText.trim()) chunks.push(`【从图片识别出的文字】\n${imageOcrText}`)
+
+  const body = truncatePlainText(chunks.join('\n\n'), LECTURE_MATERIAL_MAX)
+  options?.onProgress?.('正在根据全文整理讲义…')
+
+  const user = `【用户明确要求】${MATERIAL_LECTURE_USER_GOAL}
+
+请严格按用户要求完成：依据下方「从图片识别出的文字」与「用户输入的文字」，整理为结构化讲义 Markdown，并把重点用 **加粗** 标出。
+
+【你必须做到】
+1. 以 OCR 识别出的附图文字为**主要依据**（若有附图），与用户文字说明合并整理；使用 \`#\`、\`##\`、\`###\` 分层。
+2. 忠实原文，**不得编造**未出现的史实、数据、人名；看不清处可保留 OCR 原样或标注存疑。
+3. 核心概念、结论、时间、易错点、关键词等必须用 **加粗**。
+4. **禁止**写「如何转换图片」「假设附图内容」「示例」「讲义制作指南」等元说明；**禁止**复述本提示。
+5. 只输出讲义正文（简体中文），无代码围栏，无前言后记。
+
+【资料全文】
+${body}`
+
+  const text = await deepseekChatRaw(user, {
+    system: `你是专业的课程讲义整理助手。用户要求：${MATERIAL_LECTURE_USER_GOAL}。你已收到从图片 OCR 得到的全文，请直接整理讲义并加粗重点，不要写教程或假设性示例。`,
+    temperature: 0.35,
+    model: DEEPSEEK_MODEL_HEAVY,
+  })
+  const md = stripMindmapMarkdownFence(text)
+  if (!md) throw new Error('DeepSeek 未返回有效的讲义内容')
+  return md
+}
+
 
 /**
  * 学习工具「思维导图」：根据用户粘贴的长文，生成可供 markmap 渲染的 Markdown 树。
  */
-export async function requestMindmapMarkdownFromSourceText(sourceText: string): Promise<string> {
+export async function requestMindmapMarkdownFromSourceText(
+  sourceText: string,
+  options?: {
+    partIndex?: number
+    partTotal?: number
+    /** 全书总标题（若有），本段导图禁止照抄为 `#` 根节点 */
+    documentThemeTitle?: string | null
+    /** 据本段材料推断的本段主题（时期 / 章节 / 板块） */
+    segmentThemeTitle?: string | null
+  },
+): Promise<string> {
   const raw = sourceText.trim()
   if (!raw) throw new Error('请先粘贴需要整理的学习材料')
 
   const body = truncatePlainText(raw, MINDMAP_SOURCE_TEXT_MAX)
+  const docTheme = options?.documentThemeTitle?.trim()
+  const segmentTheme = options?.segmentThemeTitle?.trim()
+  const segmentRootHint =
+    segmentTheme ?
+      `\n【本段导图根主题 — 最重要】
+- 输出**第一行必须是** \`# …\`（建议概括名：「${segmentTheme}」），概括本段讲哪一块（6～18 字），**禁止**缺省、禁止文首直接以 \`##\` 开头而无 \`#\`。
+- 其下用 \`##\` 列各知识点，\`###\` 列细节。${docTheme ? `**禁止**把全书总标题「${docTheme}」或仅写时期范围（如「新时代 (2012至今)」）当作 \`#\`；\`#\` 要比 \`##\` 更上位、更有概括性。` : ''}\n`
+    : options?.partTotal != null && options.partTotal > 1
+      ? `\n【本段导图根主题】文首必须有概括性 \`#\` 标题；${docTheme ? `勿用全书总标题「${docTheme}」或空泛时期名充当 \`#\`。` : ''}再用 \`##\` 列各小节。\n`
+      : `\n【导图根主题】文首必须有概括性 \`#\` 标题（6～18 字），概括本篇材料核心板块。\n`
+  const partHint =
+    options?.partTotal != null &&
+    options.partTotal > 1 &&
+    options.partIndex != null
+      ? `\n【分段说明】这是用户全文的第 ${options.partIndex + 1} / ${options.partTotal} 段，**仅根据本段内容**生成导图，不要编造本段未出现的内容，也不要假设其他段落的内容。${segmentRootHint}`
+      : segmentRootHint
 
-  const user = `以下是用户提供的原始学习材料（纯文本）。请你完成「整理 → 重新划分板块 → 输出可直接用于 mindmap（markmap）渲染的 Markdown 思维导图」。
+  const user = `以下是用户提供的原始学习材料（纯文本）。请输出可供 markmap 渲染的 Markdown 思维导图。
+${partHint}
 
-【核心风格】（请贯穿全文，与下列表述一致）
-你帮我根据内容重新划分一下各个板块，并生成思维导图，弄得简单易懂，分得细一点，根据节点内容适当列举例子（比如我们国家的发展历史）或者补充一些历史背景，对一些关键词进行一定程度上的解释，并在节点上适当放上图标，重点内容需要加粗标出。
+【核心目标】
+**禁止只堆名词、标语或干条目**。学习者没看过原文也要能懂：每个 \`###\` 知识点下，子项必须是**完整句子的通俗讲解**，该举例时要举例。
 
-【任务要求】（须逐条落实）
-1. 根据内容**重新划分各个板块**，整体**简单易懂**，层级**尽量细分**（主干清晰、细节可展开）。
-2. 结合节点主题**适当列举例子**；若材料涉及发展脉络、阶段、史实等，可比照「我们国家的发展历史」这类方式补充**简短例子**或**必要背景**。材料未涉及处不要硬编事实，可写「材料未展开」等诚实提示。
-3. 对难懂的**关键词**在对应节点下用一两句话做**适度解释**。
-4. 在各级**节点标题前适当加上 emoji** 当作图标（如 📌 🔑 📚 ⚡️ 等与语义贴切即可；不要堆砌）。
-5. **重点内容**（核心概念、结论、易错点、关键数字等）务必用 Markdown 加粗：**……**。
+【通俗讲解 — 每一条都要有，不得遗漏】
+- \`###\` 下**每一条**讲解子项都必须带通俗说法，禁止只写教材式正式句就结束。
+- **正式与通俗必须分两行**：先写 \`- **标签**：正式句（≤40 字）\`，再写子项 \`- 通俗：……（≤40 字）\`；**禁止**把正式与通俗接在同一行（否则导图分支过长）。
+- **是什么** 也不能例外：除时间、地点、决议名称外，必须跟 \`通俗：\` 说明「对普通人意味着什么」。
+- 其他标签（意义、任务、方针、路线等）**同样每条必有通俗**；不要出现「有的子项有通俗、有的只有官方表述」这种不一致。
+- 子项格式：\`- **标签**：……；通俗：……\` 或带嵌套通俗子项。标签可灵活，但冒号后必须是**可独立读懂的完整句**。
+- 每个 \`###\` 知识点**至少**含：1 条「是什么」（含通俗）+ 1～3 条相关讲解（**每条含通俗**）+ 能举例时 1 条 \`例 🇨🇳\`（例不加粗）；**事件/会议类另加** 1 条「历史背景」（含通俗，见下）。
+- \`###\` 标题下**禁止**只有标题、禁止只写一行关键词就结束；未展开的考点须补全讲解与通俗，勿留空壳节点。
 
-【输出格式】（必须严格遵守）
-- **只输出**一段 Markdown 正文：不要用 \`\`\` 代码围栏包裹，不要前言或后记。
-- 使用 \`#\` 总标题、\`##\` 大板块、\`###\` / \`####\` 继续细分；说明文字用 \`-\` 无序列表挂在对应标题下，可多级嵌套。
-- 单条列表不宜过长；避免整段散文不加标题层级。
-- 使用简体中文。
+【历史事件与会议 — 须补背景】
+- 涉及**历史事件、会议、起义、运动、战争、重大转折**的 \`###\` 节点，除常规讲解外，**必须**有 1 条 \`**历史背景**\`（可放在「是什么」之前或之后）：
+  - 用 1～2 句交代**时代局势、前因后果**（如国共关系、白色恐怖、革命处于什么阶段等），让读者知道「为什么这时发生」；
+  - 同样须带 \`通俗：\`；关键时代特征、矛盾用语加 \`**\` 加粗。
+- 仍遵守同级 ≤4 条：背景 + 是什么 + 意义/任务/决策等择 1～2 条 + 例，**不要**为凑背景而超出 4 条同级项（可把背景与「为什么」合并，但事件类优先单独写背景）。
+
+【讲解方式 — 参考「是什么 / 为什么 / 怎么做 / 例」，可灵活微调】
+- 以上角度是**帮助写全讲解**的，不是机械凑四条；**以说清为准**，但该解释、该背景不能省。
+- 类型参考：定义型（是什么 + 要点/区分 + 例）；分类对比型（是什么 + 怎么区分 + 例）；**事件/会议型（历史背景 + 是什么 + 意义/任务/方针 + 例）**。
+- 与上文重复或材料没有的**整条省略**，不写「无」、不写空洞套话。
+
+【长度与拆分 — 硬性 ≤40 字/分支】
+- **每条** \`-\` 列表项（从标签到句末）**不得超过 40 个汉字**；超出必须**拆成多条分支**（可并列多条 \`- **标签**：…\`，或续行嵌套子项 \`- …\`）。
+- 一句里多个意思（用「；」连接）**必须拆成多条**，如「最高纲领 + 最低纲领」写两条，不要挤在一行。
+- 「核心任务」含奋斗目标、中心任务等多项时，**每项单独一条**，每条仍 ≤40 字且配通俗子项。
+
+【标题与主题 — 必遵守】
+1. \`#\` \`##\` \`###\` 标题**禁止写序号**：不要「1.」「2.」「六、」「（一）」等开头。
+2. 标题用**概括性短语**（如「主要矛盾与基本国情」「四个全面战略布局」），不要照抄材料长句、口号全文或带序号的目录条。
+3. \`#\` 是本段总领（比 \`##\` 更上位）；\`##\` 是并列大知识点。勿用仅表示时期范围的短句当 \`#\` 而又在 \`##\` 重复列具体考点。
+
+【分支数量与方向性 — 硬性上限 4 条】
+- **同一父节点下直接子分支最多 4 条**（并列 \`##\` / \`###\` / \`####\`，或 \`###\` 下顶层 \`-\` 列表项）。**绝不可**出现 5～9 条平级分支（如一大下列 9 条）。
+- 超过 4 条时，**必须先加 \`####\` 分支类型**再归类，推荐 4 类（按材料选用）：
+  - \`#### 时代背景\`（历史背景、为什么等）
+  - \`#### 会议概况\`（是什么）
+  - \`#### 任务与方略\`（纲领、中心任务、方针等）
+  - \`#### 组织与影响\`（选举、意义、例 🇨🇳 等）
+- 每条 \`####\` 类型下再放 ≤4 条 \`-\` 讲解（含嵌套通俗子项）；**禁止**把「历史背景、是什么、核心任务、选举、例」全部平铺在 \`###\` 同一层。
+- 分组要有**阅读顺序/逻辑方向**，让读者先抓主线再进细节，例如：
+  - 按「背景与矛盾 → 目标任务 → 布局举措 → 保障要求」；
+  - 或「是什么 → 为什么 → 怎么做/意义」；
+  - 或按领域：经济 / 政治 / 文化社会 / 党建军事（择一种最贴材料的，勿混用太多套）。
+- 父节点下优先 **2～4 条**即可，宁可用中间层归纳，也不要一次列出 5～9 个平级关键词。
+
+【粒度与层级 — 细但不乱】
+- 内容要拆成**短句、可记忆的子要点**，但**纵向加深层级**，不要**横向摊太多同级分支**。
+- 推荐层级：\`#\` → \`##\`（≤4）→ \`###\` 事件/知识点（≤4）→ \`####\` 分支类型（≤4）→ \`-\` 讲解（每组 ≤4，通俗用子项）→ 必要时再嵌套。
+- 会议类 \`###\` 示例结构：\`### 党的一大\` 下只有 4 个 \`####\`（时代背景 / 会议概况 / 任务与方略 / 组织与影响），**不要** 9 条同级 \`-\`。
+- 材料考点要覆盖，但通过**分组归纳**呈现，不要牺牲结构清晰度。
+
+【结构与风格】
+1. 层级：\`#\` → \`##\`（≤4 个方向）→ \`###\`（每组 ≤4）→ 列表细节；**先方向、后细节**。
+2. 节点标题前加贴切 **emoji**（勿堆砌）。
+3. 表述通俗易懂。
+
+【加粗重点 — 不可遗漏】
+- 凡**解释性条目**（历史背景、是什么、为什么、意义、任务、方针、路线等）的正文中，对以下内容必须用 \`**…**\` 标出，**每个 \`###\` 知识点约 3～6 处**，不要整段无加粗：
+  - 会议/事件名称与年份、纲领党章名称、路线方针提法、核心论断与口号、重要人物与职务、易混概念对比点。
+- 加粗与 \`通俗：\` **同时出现**：先写带加粗的正式句，再写通俗，不要因加了通俗就省略加粗。
+- **「例 🇨🇳」整条不得加粗**。
+
+【禁止】
+- 禁止**部分子项有通俗、部分没有**；禁止历史事件/会议类缺少 \`**历史背景**\`；禁止「是什么」只写决议原文而无 \`通俗：\`。
+- 禁止解释性正文**该加粗却不加粗**（整段无 \`**\`）。
+- 禁止单条分支超过 **40 字**；禁止正式与通俗写在同一行。
+- 禁止同一层级下出现 **5 个及以上**并列分支（含 \`###\` 下平铺多条 \`-\`）；禁止不用 \`####\` 归类就把历史背景、是什么、任务、选举、例排成一排。
+- 禁止只列术语/职务/年份；禁止 \`###\` 空节点或只有标题无列表子项。
+- 禁止标题带序号；禁止无 \`#\` 开头；禁止「例」里加粗；禁止单条超长不换行。
+- 禁止前言、后记、代码围栏。
+
+【输出格式】
+- 只输出 Markdown；\`-\` 列表可多级嵌套；简体中文。
 
 【原始材料】
 ${body}`
 
   const text = await deepseekChatRaw(user, {
     system:
-      '你是专业的知识整理与思维导图助手，只输出符合用户格式要求的 Markdown，不输出任何额外说明。',
-    temperature: 0.35,
+      '你是思维导图助教。###下用≤4个####归类（时代背景/会议概况/任务与方略/组织与影响），禁止9条平铺；每分支≤40字；通俗子项；**加粗**；例不加粗。',
+    temperature: 0.38,
+    model: DEEPSEEK_MODEL_HEAVY,
   })
   const md = stripMindmapMarkdownFence(text)
   if (!md) throw new Error('DeepSeek 未返回有效的导图 Markdown')
@@ -83,43 +353,24 @@ export function isAiChatConfigured(): boolean {
 
 async function deepseekChatRaw(
   user: string,
-  options?: { system?: string; temperature?: number },
+  options?: { system?: string; temperature?: number; maxTokens?: number; model?: string },
 ): Promise<string> {
-  const url = chatCompletionsUrl()
-  if (!url) {
-    throw new Error(
-      '未配置 AI 代理地址：生产构建请设置 VITE_AI_API_BASE（见 docs/ENV-说明.md）',
-    )
-  }
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
+  return deepseekChatCompletion(
+    [
+      {
+        role: 'system',
+        content:
+          options?.system ??
+          '你是专业、严谨的学习助手，只输出用户要求的格式，使用简体中文。',
+      },
+      { role: 'user', content: user },
+    ],
+    {
+      temperature: options?.temperature,
+      maxTokens: options?.maxTokens,
+      model: options?.model ?? DEEPSEEK_MODEL_DEFAULT,
     },
-    body: JSON.stringify({
-      model: 'deepseek-chat',
-      messages: [
-        {
-          role: 'system',
-          content:
-            options?.system ??
-            '你是专业、严谨的学习助手，只输出用户要求的格式，使用简体中文。',
-        },
-        { role: 'user', content: user },
-      ],
-      temperature: options?.temperature ?? 0.35,
-    }),
-  })
-  if (!res.ok) {
-    const errText = await res.text()
-    throw new Error(`DeepSeek 请求失败（${res.status}）：${errText.slice(0, 280)}`)
-  }
-  const data = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string } }>
-  }
-  const text = data.choices?.[0]?.message?.content?.trim()
-  if (!text) throw new Error('DeepSeek 未返回有效内容')
-  return text
+  )
 }
 
 const KEYWORD_FOLLOWUP_MATERIAL_MAX = 14_000
@@ -297,11 +548,12 @@ export async function requestMindmapDerivedMcqs(input: {
 }): Promise<MindmapDerivedMcq[]> {
   const md = (input.markdown ?? '').trim()
   if (!md) throw new Error('思维导图内容为空')
-  const user = `下面是一则思维导图草稿（Markdown）。其中 **加粗** 的文字是核心考点。\n\n请你根据全文**丰富程度**生成 **5～10 道** 测验用选择题：加粗要点多、层次丰富时尽量出满 **10 道**；内容较简略时不少于 **5 道**，并优先覆盖所有重要加粗要点。\n\n**出题比例（必须遵守）**：\n- **至少约 80%** 的题目要**主要考查加粗文字**对应的概念、结论或关系（正确选项的判据应能对应到这些加粗要点）。\n- **至多约 20%** 的题目可考查**非加粗**但结合上下文仍需理解的内容（如结构、层级、衔接），且必须**严格依据原文**，不得编造文中没有的信息。\n\n**关于“举例/案例”内容的命题约束（必须遵守）**：\n- 如果原文里出现“例如、举例、案例、样例、情景”等示例内容，**不要把示例原文直接当题干或正确选项**。\n- 可以把示例作为启发，改写为新的情境或换一个同类例子，题目要回到**考点本身**（概念、原理、关系、判据）而不是记忆某个示例句子。\n- 禁止仅做表面替换（改几个词仍是同一例子）；应做到“同考点、非原例、可迁移”。\n\n**格式要求**：\n- 每道题 5 个选项：correct 为所有正确选项文本数组，distractors 为所有错误选项文本数组；|correct|+|distractors| 必须等于 5。\n- mode 为 single 时 correct 长度必须为 1，distractors 长度 4；mode 为 multiple 时 correct 长度至少 2，distractors 长度 = 5 - |correct|。\n- 题干 stem 不要直接照抄加粗原句、示例原句或泄露答案。\n- 使用简体中文。\n\n思维导图标题：${input.title.trim() || '（无）'}\n\n---\n${md}\n---\n\n仅返回 JSON 数组（长度在 5～10 之间），元素字段：stem, mode, correct, distractors。不要 markdown 代码块或其它说明。`
+  const user = `下面是一则思维导图草稿（Markdown）。其中 **加粗** 的文字是核心考点。\n\n请你根据全文**丰富程度**生成 **5～10 道** 测验用选择题：加粗要点多、层次丰富时尽量出满 **10 道**；内容较简略时不少于 **5 道**，并优先覆盖所有重要加粗要点。\n\n**出题比例（必须遵守）**：\n- **至少约 80%** 的题目要**主要考查加粗文字**对应的概念、结论或关系（正确选项的判据应能对应到这些加粗要点）。\n- **至多约 20%** 的题目可考查**非加粗**但结合上下文仍需理解的内容（如结构、层级、衔接），且必须**严格依据原文**，不得编造文中没有的信息。\n\n**关于“举例/案例”内容的命题约束（必须遵守）**：\n- 如果原文里出现“例如、举例、案例、样例、情景”等示例内容，**不要把示例原文直接当题干或正确选项**。\n- 可以把示例作为启发，改写为新的情境或换一个同类例子，题目要回到**考点本身**（概念、原理、关系、判据）而不是记忆某个示例句子。\n- 禁止仅做表面替换（改几个词仍是同一例子）；应做到“同考点、非原例、可迁移”。\n\n**防泄题（必须遵守）**：\n- 题干 stem 中**不得**出现 correct 数组里任一正确选项的原文、加粗考点的完整复述，或与正确项高度重合的短语。\n- 若题目问「某概括/评价/定位对应什么」，题干只写背景与提问指向，**不要把答案短语写进题干**。\n- 错误示例：题干写「被概括为"立党之本、执政之基、力量之源"……对应什么地位？」，而
+选项却是「立党之本、执政之基、力量之源」——题干已泄题。\n- 正确示例：题干写「"三个代表"重要思想在党史上的地位，常被概括为下列哪一表述？」——各表述放在选项中供辨析。\n\n**格式要求**：\n- 每道题 5 个选项：correct 为所有正确选项文本数组，distractors 为所有错误选项文本数组；|correct|+|distractors| 必须等于 5。\n- mode 为 single 时 correct 长度必须为 1，distractors 长度 4；mode 为 multiple 时 correct 长度至少 2，distractors 长度 = 5 - |correct|。\n- 题干 stem 不要直接照抄加粗原句、示例原句；不得泄露任何正确选项原文。\n- 使用简体中文。\n\n思维导图标题：${input.title.trim() || '（无）'}\n\n---\n${md}\n---\n\n仅返回 JSON 数组（长度在 5～10 之间），元素字段：stem, mode, correct, distractors。不要 markdown 代码块或其它说明。`
 
   const raw = await deepseekChatRaw(user, {
     system:
-      '只输出合法 JSON 数组，长度 5～10。不要输出 markdown 围栏。加粗相关题目须占绝大多数。',
+      '只输出合法 JSON 数组，长度 5～10。不要输出 markdown 围栏。加粗相关题目须占绝大多数。题干不得包含正确选项原文或泄题短语。',
     temperature: 0.45,
   })
   let parsed: unknown
@@ -329,6 +581,7 @@ export async function requestMindmapDerivedMcqs(input: {
     if (mode === 'single' && correct.length !== 1) continue
     if (mode === 'multiple' && correct.length < 2) continue
     if (correct.length + distractors.length !== 5) continue
+    if (mcqStemLeaksAnswer(stem, correct)) continue
     out.push({ stem, mode, correct, distractors })
     if (out.length >= 10) break
   }

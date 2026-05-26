@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, watch, watchEffect } from 'vue'
+import { computed, onBeforeUnmount, onMounted, watch, watchEffect } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRoute } from 'vue-router'
 import { APP_NAME, APP_TAGLINE } from '@/constants/branding'
@@ -7,6 +7,8 @@ import { learningMenuItems } from '@/constants/learning-menu'
 import { useWebUsageTracker } from '@/composables/useWebUsageTracker'
 import { useAppearanceStore } from '@/stores/appearance'
 import { applyDailyStudyingPenaltyIfNeeded } from '@/views/learning/question-bank-score/wen-wu-study-mode'
+import BackgroundMusicMiniPlayer from '@/components/BackgroundMusicMiniPlayer.vue'
+import { useBackgroundMusicStore } from '@/stores/background-music'
 
 useWebUsageTracker()
 
@@ -24,6 +26,11 @@ watch(
 
 const appearanceStore = useAppearanceStore()
 const { shellClass, shellStyle, chromeSurfaceStyle, themeStyle } = storeToRefs(appearanceStore)
+
+const backgroundMusicStore = useBackgroundMusicStore()
+onMounted(() => {
+  backgroundMusicStore.ensureInitialized()
+})
 
 const appShellInlineStyle = computed(() => ({
   ...shellStyle.value,
@@ -63,6 +70,7 @@ onBeforeUnmount(() => {
         <RouterView />
       </div>
     </main>
+    <BackgroundMusicMiniPlayer />
   </div>
 </template>
 

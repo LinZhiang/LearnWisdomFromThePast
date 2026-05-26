@@ -7,6 +7,10 @@ import '@vueup/vue-quill/dist/vue-quill.snow.css'
 const props = defineProps<{
   modelValue: string
   placeholder?: string
+  /** 允许从剪贴板粘贴图片 */
+  enableMediaPaste?: boolean
+  /** 工具栏显示「插入视频」 */
+  enableVideoEmbed?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -24,8 +28,30 @@ const content = computed({
   set: (value: string) => emit('update:modelValue', value),
 })
 
-const onEditorReady = (quill: Quill) => {
-  quillInstance.value = quill
+const VIDEO_URL_RE =
+  /^(https?:\/\/)?[\w.-]+\.(youtube\.com|youtu\.be|bilibili\.com|v\.qq\.com)|\.(mp4|webm|m3u8)(\?|$)/i
+
+type QuillWithHandlers = Quill & {
+  __imageClickHandler?: (event: Event) => void
+  __imageKeydownHandler?: (event: KeyboardEvent) => void
+  __mediaPasteHandler?: (event: ClipboardEvent) => void
+}
+
+const insertVideoLink = (quill: QuillWithHandlers, url: string) => {
+  const safe = url.trim().replace(/"/g, '&quot;')
+  if (!safe) return
+  const range = quill.getSelection(true)
+  const index = range?.index ?? quill.getLength()
+  quill.clipboard.dangerouslyPasteHTML(
+    index,
+    `<p><strong>视频</strong>：<a href="${safe}" target="_blank" rel="noopener noreferrer">${safe}</a></p>`,
+    'user',
+  )
+  quill.setSelection(index + 1, 0)
+}
+
+const onEditorReady = (quill: QuillWithHandlers) => {
+  quillInstance.value = quill as Quill
   const setActiveImage = (target: EventTarget | null) => {
     if (!(target instanceof HTMLImageElement)) {
       activeImageEl.value = null
@@ -60,6 +86,39 @@ const onEditorReady = (quill: Quill) => {
     clickHandler
   ;(quill as Quill & { __imageKeydownHandler?: (event: KeyboardEvent) => void }).__imageKeydownHandler =
     keydownHandler
+
+  if (props.enableMediaPaste) {
+    const pasteHandler = async (event: ClipboardEvent) => {
+      const items = event.clipboardData?.items
+      if (!items?.length) return
+      for (const item of items) {
+        if (!item.type.startsWith('image/')) continue
+        const file = item.getAsFile()
+        if (!file) continue
+        event.preventDefault()
+        const base64 = await new Promise<string | null>((resolve) => {
+          const reader = new FileReader()
+          reader.onload = () =>
+            resolve(typeof reader.result === 'string' ? reader.result : null)
+          reader.onerror = () => resolve(null)
+          reader.readAsDataURL(file)
+        })
+        if (!base64) return
+        const range = quill.getSelection(true)
+        const index = range?.index ?? quill.getLength()
+        quill.insertEmbed(index, 'image', base64)
+        quill.setSelection(index + 1, 0)
+        return
+      }
+      const text = event.clipboardData?.getData('text/plain')?.trim() ?? ''
+      if (text && VIDEO_URL_RE.test(text)) {
+        event.preventDefault()
+        insertVideoLink(quill, text)
+      }
+    }
+    quill.root.addEventListener('paste', pasteHandler)
+    quill.__mediaPasteHandler = pasteHandler
+  }
 }
 
 const pickLocalImage = () =>
@@ -137,22 +196,27 @@ const editorOptions = {
         imageLarger: () => resizeActiveImage(40),
         imageReset: () => resetActiveImageSize(),
         imageDelete: () => removeActiveImage(),
+        video: () => {
+          const quill = quillInstance.value ?? editorRef.value?.getQuill()
+          if (!quill) return
+          const url = window.prompt('请输入视频链接（如 B站、YouTube、mp4 直链等）')
+          if (!url?.trim()) return
+          insertVideoLink(quill as QuillWithHandlers, url.trim())
+        },
       },
     },
   },
 } as unknown as QuillOptions
 
 onBeforeUnmount(() => {
-  const quill = quillInstance.value as
-    | (Quill & {
-        __imageClickHandler?: (event: Event) => void
-        __imageKeydownHandler?: (event: KeyboardEvent) => void
-      })
-    | null
+  const quill = quillInstance.value as QuillWithHandlers | null
   if (!quill?.__imageClickHandler) return
   quill.root.removeEventListener('click', quill.__imageClickHandler)
   if (quill.__imageKeydownHandler) {
     quill.root.removeEventListener('keydown', quill.__imageKeydownHandler)
+  }
+  if (quill.__mediaPasteHandler) {
+    quill.root.removeEventListener('paste', quill.__mediaPasteHandler)
   }
 })
 </script>
@@ -192,6 +256,9 @@ onBeforeUnmount(() => {
       <span class="ql-formats">
         <button class="ql-link" type="button" />
         <button class="ql-image" type="button" />
+        <button v-if="enableVideoEmbed" class="ql-video" type="button" title="插入视频链接">
+          视频
+        </button>
         <button class="ql-clean" type="button" />
       </span>
       <span class="ql-formats image-actions-inline">
@@ -232,7 +299,8 @@ onBeforeUnmount(() => {
   border-top-right-radius: 8px;
 }
 
-.image-actions-inline button {
+.image-actions-inline button,
+.unified-toolbar .ql-video {
   width: auto;
   padding: 0 8px;
   font-size: 12px;

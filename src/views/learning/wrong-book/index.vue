@@ -121,45 +121,80 @@ const onTreeSelect = (id: number | null) => {
           />
           <template v-else>
           <div class="wrong-list-head">
-            <p>
+            <p class="wrong-list-topic">
               当前知识点：<strong>{{ wb.selectedLearningTypeName }}</strong>
             </p>
-            <div class="wrong-list-actions">
-              <span class="backfill-days-label">回填范围</span>
-              <el-input-number
-                v-model="wb.backfillWithinDays"
-                :min="1"
-                :max="3650"
-                :step="1"
-                step-strictly
-                controls-position="right"
-              />
-              <!-- <el-button :loading="wb.backfilling" @click="wb.previewBackfillFromLogs">
-                回填预览
-              </el-button> -->
-              <el-button :loading="wb.backfilling" type="primary" @click="wb.backfillFromLogs">
-                历史日志回填
-              </el-button>
-              <el-button type="danger" plain @click="wb.batchRemoveSelected">批量删除</el-button>
-              <el-button plain @click="wb.showTrashPanel = true">恢复删除</el-button>
-              <el-button plain @click="wb.clearSelection">清空勾选</el-button>
-              <el-switch
-                v-model="wb.onlyDue"
-                inline-prompt
-                active-text="仅看到期"
-                inactive-text="全部"
-              />
-              <el-button
-                type="primary"
-                :disabled="
-                  !wb.selectedLearningTypeId ||
-                  (!wb.wrongBookTestQuestionBanks.length && !wb.wrongBookTestPresetUnits.length)
-                "
-                @click="wb.openWrongBookTest"
-              >
-                错题测验
-              </el-button>
-              <el-button :loading="wb.loading" @click="wb.loadData">刷新</el-button>
+            <div class="wrong-toolbar" role="toolbar" aria-label="错题本操作">
+              <div class="wrong-toolbar-group">
+                <span class="wrong-toolbar-label">回填范围</span>
+                <el-input-number
+                  v-model="wb.backfillWithinDays"
+                  class="wrong-toolbar-input"
+                  :min="1"
+                  :max="3650"
+                  :step="1"
+                  step-strictly
+                  controls-position="right"
+                />
+                <el-button
+                  class="wrong-toolbar-btn"
+                  :loading="wb.backfilling"
+                  @click="wb.backfillFromLogs"
+                >
+                  历史日志回填
+                </el-button>
+              </div>
+
+              <span class="wrong-toolbar-divider" aria-hidden="true" />
+
+              <div class="wrong-toolbar-group">
+                <el-button
+                  class="wrong-toolbar-btn"
+                  type="danger"
+                  plain
+                  @click="wb.batchRemoveSelected"
+                >
+                  批量删除
+                </el-button>
+                <el-button class="wrong-toolbar-btn" plain @click="wb.showTrashPanel = true">
+                  恢复删除
+                </el-button>
+                <el-button class="wrong-toolbar-btn" plain @click="wb.clearSelection">
+                  清空勾选
+                </el-button>
+              </div>
+
+              <span class="wrong-toolbar-divider" aria-hidden="true" />
+
+              <div class="wrong-toolbar-group wrong-toolbar-group--filter">
+                <span class="wrong-toolbar-label">显示</span>
+                <el-switch
+                  v-model="wb.onlyDue"
+                  inline-prompt
+                  active-text="仅看到期"
+                  inactive-text="全部"
+                />
+              </div>
+
+              <span class="wrong-toolbar-spacer" aria-hidden="true" />
+
+              <div class="wrong-toolbar-group wrong-toolbar-group--end">
+                <el-button
+                  class="wrong-toolbar-btn"
+                  type="primary"
+                  :disabled="
+                    !wb.selectedLearningTypeId ||
+                    (!wb.wrongBookTestQuestionBanks.length &&
+                      !wb.wrongBookTestPresetUnits.length)
+                  "
+                  @click="wb.openWrongBookTest"
+                >
+                  错题测验
+                </el-button>
+                <el-button class="wrong-toolbar-btn" :loading="wb.loading" @click="wb.loadData">
+                  刷新
+                </el-button>
+              </div>
             </div>
           </div>
           <p v-if="wb.loading">加载中...</p>
@@ -182,8 +217,30 @@ const onTreeSelect = (id: number | null) => {
               </span>
               <span>题目</span>
               <span>题型</span>
-              <span>错误次数</span>
-              <span>复习轮次</span>
+              <button
+                type="button"
+                class="cell-sortable"
+                :class="{ 'is-active': wb.wrongBookSortIndicator('wrongCount') !== '↕' }"
+                :aria-label="wb.wrongBookSortAriaLabel('wrongCount', '错误次数')"
+                @click="wb.toggleWrongBookSort('wrongCount')"
+              >
+                错误次数
+                <span class="cell-sort-indicator" aria-hidden="true">{{
+                  wb.wrongBookSortIndicator('wrongCount')
+                }}</span>
+              </button>
+              <button
+                type="button"
+                class="cell-sortable"
+                :class="{ 'is-active': wb.wrongBookSortIndicator('reviewStage') !== '↕' }"
+                :aria-label="wb.wrongBookSortAriaLabel('reviewStage', '复习轮次')"
+                @click="wb.toggleWrongBookSort('reviewStage')"
+              >
+                复习轮次
+                <span class="cell-sort-indicator" aria-hidden="true">{{
+                  wb.wrongBookSortIndicator('reviewStage')
+                }}</span>
+              </button>
               <span>下次复习</span>
               <span>操作</span>
             </div>
@@ -302,62 +359,106 @@ const onTreeSelect = (id: number | null) => {
 
 .wrong-list-head {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
   gap: 12px;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--app-border-soft);
 }
 
-.wrong-list-head p {
+.wrong-list-topic {
   margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
 }
 
-.wrong-list-actions {
+.wrong-toolbar {
   display: flex;
-  align-items: center;
-  gap: 10px;
   flex-wrap: wrap;
-}
-
-.backfill-days-label {
-  font-size: 12px;
-  color: var(--app-text-muted);
-}
-
-.wrong-list-actions :deep(.el-button) {
-  height: 32px;
-  padding: 0 12px;
-  border-radius: 8px;
-}
-
-.wrong-list-actions :deep(.el-input-number) {
-  width: 120px;
-}
-
-.wrong-list-actions :deep(.el-input-number .el-input__wrapper) {
-  min-height: 32px;
-  border-radius: 8px;
-}
-
-.wrong-list-actions :deep(.el-switch) {
-  height: 32px;
-  display: inline-flex;
   align-items: center;
+  gap: 10px 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--app-surface-alt);
+  border: 1px solid var(--app-border-soft);
 }
 
-.wrong-list-actions :deep(.el-switch__core) {
-  min-width: 50px;
-  height: 26px;
-  border-radius: 13px;
+.wrong-toolbar-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
-.wrong-list-actions :deep(.el-switch__action) {
-  width: 20px;
-  height: 20px;
+.wrong-toolbar-group--filter {
+  gap: 10px;
 }
 
-.wrong-list-actions :deep(.el-switch__label) {
+.wrong-toolbar-group--end {
+  margin-left: auto;
+}
+
+.wrong-toolbar-spacer {
+  flex: 1 1 8px;
+  min-width: 8px;
+}
+
+.wrong-toolbar-divider {
+  width: 1px;
+  height: 24px;
+  background: var(--app-border);
+  flex-shrink: 0;
+}
+
+.wrong-toolbar-label {
+  font-size: 13px;
+  color: var(--app-text-muted);
+  white-space: nowrap;
+}
+
+.wrong-toolbar :deep(.wrong-toolbar-btn) {
+  height: 32px;
+  padding: 0 14px;
+  margin: 0;
+  border-radius: 6px;
+}
+
+.wrong-toolbar :deep(.wrong-toolbar-input) {
+  width: 108px;
+}
+
+.wrong-toolbar :deep(.wrong-toolbar-input .el-input__wrapper) {
+  min-height: 32px;
+  border-radius: 6px;
+}
+
+.wrong-toolbar :deep(.el-switch) {
+  height: 32px;
+}
+
+.wrong-toolbar :deep(.el-switch__core) {
+  min-width: 52px;
+  height: 22px;
+}
+
+.wrong-toolbar :deep(.el-switch__label) {
   font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .wrong-toolbar-divider {
+    display: none;
+  }
+
+  .wrong-toolbar-spacer {
+    display: none;
+  }
+
+  .wrong-toolbar-group--end {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-end;
+  }
 }
 
 .wrong-empty-block {
@@ -377,7 +478,7 @@ const onTreeSelect = (id: number | null) => {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  height: calc(100% - 96px);
+  height: calc(100% - 128px);
   max-height: min(56vh, 480px);
 }
 
@@ -391,13 +492,47 @@ const onTreeSelect = (id: number | null) => {
 }
 
 .wrong-table-head {
+  flex-shrink: 0;
   background: var(--app-surface-alt);
   font-weight: 600;
   border-bottom: 1px solid var(--app-border-soft);
 }
 
-.wrong-table-head {
-  flex-shrink: 0;
+.cell-sortable {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  border-radius: 4px;
+}
+
+.cell-sortable:hover {
+  color: var(--app-primary, #2563eb);
+}
+
+.cell-sortable.is-active {
+  color: var(--app-primary, #2563eb);
+}
+
+.cell-sort-indicator {
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0.55;
+  font-weight: 700;
+}
+
+.cell-sortable.is-active .cell-sort-indicator,
+.cell-sortable:hover .cell-sort-indicator {
+  opacity: 1;
 }
 
 .wrong-table-body {

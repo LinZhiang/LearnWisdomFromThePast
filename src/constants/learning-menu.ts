@@ -26,6 +26,11 @@ export const learningMenuItems: LearningMenuItem[] = [
     path: '/learning/question-bank-score',
   },
   {
+    key: 'money-spend',
+    title: '金钱消费',
+    path: '/learning/money-spend',
+  },
+  {
     key: 'score-ranking',
     title: '分数排名',
     path: '/learning/score-ranking',
@@ -49,5 +54,10 @@ export const learningMenuItems: LearningMenuItem[] = [
     key: 'mindmap-viewer',
     title: '思维导图',
     path: '/tools/mindmap-viewer',
+  },
+  {
+    key: 'material-organize',
+    title: '资料整理',
+    path: '/tools/material-organize',
   },
 ]

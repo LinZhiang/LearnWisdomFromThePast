@@ -19,6 +19,19 @@ export interface QuestionBank {
   updatedAt: string
 }
 
+/** 题库测验 AI 预生成结果（干扰项 / 导图小题），按题目持久化以减少重复扣费 */
+export type QuestionBankAiPrepKind = 'choice-distractors' | 'mindmap-mcqs'
+
+export interface QuestionBankAiPrep {
+  id?: number
+  questionBankId: number
+  kind: QuestionBankAiPrepKind
+  /** 题目内容指纹；与当前题目不一致时视为过期并重新生成 */
+  fingerprint: string
+  payloadJson: string
+  updatedAt: string
+}
+
 /** 测验中导图衍生选择题的快照（非题库独立行） */
 export type FavoriteDerivedMcqPayload = {
   kind: 'mindmap-mcq'

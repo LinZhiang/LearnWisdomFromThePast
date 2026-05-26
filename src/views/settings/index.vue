@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useAppearanceStore } from '@/stores/appearance'
 import { APP_CACHE_FILE_PREFIX } from '@/constants/branding'
@@ -8,13 +8,50 @@ import {
   importCacheSnapshot,
   previewCacheSnapshot,
 } from '@/services/cache-backup'
+import {
+  BACKGROUND_IMAGE_SET_FEE,
+  isBackgroundImageRemoval,
+  settleBackgroundImageSetFee,
+} from '@/services/background-image-billing'
 import { fileToStorableBackgroundDataUrl, isLikelyImageFile } from '@/utils/backgroundImageUpload'
+import { isDataUrlBackground } from '@/utils/backgroundImageFit'
+import BackgroundImageFitEditor from './components/BackgroundImageFitEditor.vue'
+import BackgroundMusicSection from './components/BackgroundMusicSection.vue'
 
 const appearanceStore = useAppearanceStore()
-const { backgroundColor, backgroundOpacity, backgroundImage, chromeOpacity, themeStyle } =
+const { backgroundColor, backgroundOpacity, backgroundImage, backgroundImageFit, chromeOpacity, themeStyle } =
   storeToRefs(appearanceStore)
+
+const showBackgroundFitEditor = computed(() =>
+  isDataUrlBackground(backgroundImage.value.trim()),
+)
+
+onMounted(() => {
+  bgUploadBusy.value = false
+  const img = backgroundImage.value.trim()
+  if (isDataUrlBackground(img) && !backgroundImageFit.value) {
+    window.setTimeout(() => {
+      void appearanceStore.initBackgroundImageFitFromUrl(img)
+    }, 0)
+  }
+})
 const uploadMessage = ref('')
 const bgUploadBusy = ref(false)
+const bgFileInputRef = ref<HTMLInputElement | null>(null)
+const cacheUploadRef = ref<HTMLInputElement | null>(null)
+
+const triggerBackgroundFilePick = () => {
+  if (bgUploadBusy.value) {
+    uploadMessage.value = '正在处理上一张图片，请稍候…'
+    return
+  }
+  uploadMessage.value = ''
+  bgFileInputRef.value?.click()
+}
+
+const triggerCacheUpload = () => {
+  cacheUploadRef.value?.click()
+}
 const opacityPercent = computed(() => Math.round(backgroundOpacity.value * 100))
 const chromeOpacityPercent = computed(() => Math.round(chromeOpacity.value * 100))
 
@@ -24,16 +61,37 @@ const onThemeStyleChange = (v: string) => {
   }
 }
 
-const handleBackgroundImageChange = (event: Event) => {
-  const value = (event.target as HTMLInputElement).value
-  if (!appearanceStore.updateBackgroundImage(value)) {
+const applyBackgroundImageWithBilling = (next: string): boolean => {
+  const prev = backgroundImage.value
+  if (!appearanceStore.updateBackgroundImage(next)) {
     uploadMessage.value =
       '保存失败：地址或内容过长，超出浏览器本地存储上限。请改用「上传本地背景图」自动压缩，或使用较短的网络图片 URL。'
+    return false
   }
+  const charge = settleBackgroundImageSetFee(prev, next)
+  if (!charge.ok) {
+    appearanceStore.updateBackgroundImage(prev)
+    uploadMessage.value = charge.message
+    return false
+  }
+  if (charge.charged) {
+    uploadMessage.value = `已设置背景图，扣除 ${BACKGROUND_IMAGE_SET_FEE} 元，当前余额 ${charge.balance} 元。`
+  } else if (!isBackgroundImageRemoval(next)) {
+    uploadMessage.value = '已设置背景图（本次未扣费）。'
+  } else if (isBackgroundImageRemoval(next)) {
+    uploadMessage.value = '已去除背景图（不扣费）。'
+  }
+  return true
+}
+
+const handleBackgroundImageChange = (event: Event) => {
+  const value = (event.target as HTMLInputElement).value
+  applyBackgroundImageWithBilling(value)
 }
 
 /** 多档压缩 + 重试写入，避免大图 Base64 撑爆 localStorage */
-const tryCompressAndSaveBackground = async (file: File): Promise<boolean> => {
+const tryCompressAndSaveBackground = async (file: File): Promise<'ok' | 'storage_fail' | 'billing_fail'> => {
+  const prev = backgroundImage.value
   const steps = [
     { maxEdge: 1920, q: 0.84 },
     { maxEdge: 1600, q: 0.78 },
@@ -43,32 +101,54 @@ const tryCompressAndSaveBackground = async (file: File): Promise<boolean> => {
     { maxEdge: 640, q: 0.62 },
   ]
   for (const { maxEdge, q } of steps) {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
     const dataUrl = await fileToStorableBackgroundDataUrl(file, maxEdge, q)
-    if (appearanceStore.updateBackgroundImage(dataUrl)) {
-      return true
+    if (!appearanceStore.updateBackgroundImage(dataUrl)) continue
+    let charge: ReturnType<typeof settleBackgroundImageSetFee>
+    try {
+      charge = settleBackgroundImageSetFee(prev, dataUrl)
+    } catch {
+      appearanceStore.updateBackgroundImage(prev)
+      uploadMessage.value = '扣费处理异常，已恢复原有背景图，请稍后重试。'
+      return 'billing_fail'
     }
+    if (!charge.ok) {
+      appearanceStore.updateBackgroundImage(prev)
+      uploadMessage.value = charge.message
+      return 'billing_fail'
+    }
+    void appearanceStore.initBackgroundImageFitFromUrl(dataUrl)
+    if (charge.charged) {
+      uploadMessage.value = `已保存本地背景图：${file.name}，扣除 ${BACKGROUND_IMAGE_SET_FEE} 元，当前余额 ${charge.balance} 元。可在下方拖动调整位置与缩放。`
+    } else {
+      uploadMessage.value = `已保存本地背景图：${file.name}（本次未扣费）。可在下方拖动调整位置与缩放。`
+    }
+    return 'ok'
   }
-  return false
+  return 'storage_fail'
 }
 
 const handleBackgroundImageFileChange = async (event: Event) => {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
+  input.value = ''
   if (!file) return
 
   if (!isLikelyImageFile(file)) {
     uploadMessage.value =
       '无法识别为图片：请选择常见图片文件（如 jpg、png、webp）。若已选对仍失败，可能是系统未标出文件类型，请确认扩展名正确。'
-    input.value = ''
     return
   }
 
   bgUploadBusy.value = true
-  uploadMessage.value = '正在处理图片…'
+  uploadMessage.value = `正在处理「${file.name}」…`
+  await nextTick()
   try {
-    const ok = await tryCompressAndSaveBackground(file)
-    if (ok) {
-      uploadMessage.value = `已保存本地背景图：${file.name}`
+    const result = await tryCompressAndSaveBackground(file)
+    if (result === 'billing_fail') {
+      /* 消息已在 tryCompressAndSaveBackground 内设置 */
+    } else if (result === 'ok') {
+      /* 成功消息已在 tryCompressAndSaveBackground 内设置 */
     } else {
       uploadMessage.value =
         '保存失败：浏览器本地存储空间不足。已自动多档压缩仍无法写入。请换更小的图片、自行裁切后再传，或使用「背景图片 URL」填写网络图片地址。'
@@ -85,7 +165,6 @@ const handleBackgroundImageFileChange = async (event: Event) => {
     }
   } finally {
     bgUploadBusy.value = false
-    input.value = ''
   }
 }
 
@@ -138,12 +217,13 @@ const uploadCacheFile = async (event: Event) => {
 
 <template>
   <div class="settings-page-root">
-  <section class="settings-page">
+  <section class="settings-page settings-page--appearance">
     <header class="page-hero">
       <span class="page-kicker">系统 01</span>
       <h2 class="page-title">界面设置</h2>
       <p class="page-subtitle">
-        支持设置背景颜色、背景图片和整体风格，设置会自动保存。有背景图时，半透明背景色会叠在图片上方；切换整体风格时会将背景色同步为该风格的推荐色（你可再微调）。深色/柔和下若仍为默认白且透明度
+        支持设置背景颜色、背景图片和整体风格，设置会自动保存。上传<strong>本地背景图</strong>后可在取景框内拖动调整位置、用滑条缩放（不另扣费）。新设或更换背景时，余额足够则扣
+        <strong>{{ BACKGROUND_IMAGE_SET_FEE }} 元</strong>（不设宵禁与余额门槛；不足时跳过扣费仍可设置；清空 URL 去除背景不扣费）。有背景图时，半透明背景色会叠在图片上方；切换整体风格时会将背景色同步为该风格的推荐色（你可再微调）。深色/柔和下若仍为默认白且透明度
         100%，则视为不叠色以免挡住主题底色。顶栏与内容面板透明度只降低衬底不透明度，文字与正文内图片不受影响；拉得过低时可配合毛玻璃略微提亮可读性。
       </p>
     </header>
@@ -184,15 +264,36 @@ const uploadCacheFile = async (event: Event) => {
         />
       </label>
 
-      <label class="settings-item">
+      <div class="settings-item settings-item--bg-upload">
         <span>上传本地背景图</span>
+        <div class="settings-bg-upload-row">
+          <el-button
+            type="primary"
+            class="settings-bg-upload-btn"
+            :loading="bgUploadBusy"
+            :disabled="bgUploadBusy"
+            @click="triggerBackgroundFilePick"
+          >
+            {{ bgUploadBusy ? '处理中…' : '选择图片' }}
+          </el-button>
+          <span v-if="bgUploadBusy" class="settings-bg-upload-status">压缩并保存中，请勿关闭页面</span>
+        </div>
         <input
+          ref="bgFileInputRef"
           type="file"
+          class="settings-file-input"
           accept="image/*,.heic,.heif"
-          :disabled="bgUploadBusy"
+          tabindex="-1"
+          aria-hidden="true"
           @change="handleBackgroundImageFileChange"
         />
-      </label>
+        <p v-if="uploadMessage" class="settings-message settings-message--inline">{{ uploadMessage }}</p>
+      </div>
+
+      <BackgroundImageFitEditor
+        v-if="showBackgroundFitEditor"
+        :image-url="backgroundImage"
+      />
 
       <label class="settings-item settings-item--theme">
         <span>整体风格</span>
@@ -225,18 +326,23 @@ const uploadCacheFile = async (event: Event) => {
       </label>
     </div>
 
-    <p v-if="uploadMessage">{{ uploadMessage }}</p>
+    <p v-if="uploadMessage" class="settings-message">{{ uploadMessage }}</p>
 
     <div class="settings-actions">
-      <button type="button" @click="downloadCacheFile">下载缓存文件</button>
-      <label class="upload-cache-button">
-        上传缓存文件
-        <input type="file" accept="application/json,.json" @change="uploadCacheFile" />
-      </label>
+      <el-button class="settings-action-btn" @click="downloadCacheFile">下载缓存文件</el-button>
+      <el-button class="settings-action-btn" @click="triggerCacheUpload">上传缓存文件</el-button>
+      <el-button class="settings-action-btn" @click="appearanceStore.reset">恢复默认</el-button>
+      <input
+        ref="cacheUploadRef"
+        type="file"
+        class="settings-file-input"
+        accept="application/json,.json"
+        @change="uploadCacheFile"
+      />
     </div>
-
-    <button type="button" @click="appearanceStore.reset">恢复默认</button>
   </section>
+
+  <BackgroundMusicSection />
   </div>
 </template>
 
@@ -244,7 +350,9 @@ const uploadCacheFile = async (event: Event) => {
 .settings-page-root {
   width: 100%;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
   box-sizing: border-box;
   padding: 0 12px 28px;
 }
@@ -298,31 +406,56 @@ const uploadCacheFile = async (event: Event) => {
   padding: 0;
 }
 
-.settings-actions {
+.settings-item--bg-upload .settings-bg-upload-row {
   display: flex;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.upload-cache-button {
-  position: relative;
-  display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
-  border: 1px solid var(--app-border);
-  border-radius: 6px;
-  padding: 8px 12px;
-  background: var(--app-surface-alt);
-  cursor: pointer;
+  gap: 10px;
 }
 
-.upload-cache-button input {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
+.settings-item--bg-upload .settings-bg-upload-btn {
+  flex-shrink: 0;
 }
 
-.settings-page p {
+.settings-bg-upload-status {
+  font-size: 13px;
+  color: var(--app-text-muted);
+}
+
+.settings-message--inline {
+  margin: 0;
+}
+
+.settings-message {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--app-text-muted);
+}
+
+.settings-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.settings-actions :deep(.settings-action-btn) {
+  width: 100%;
+  margin: 0;
+  height: 36px;
+}
+
+.settings-file-input {
+  display: none;
+}
+
+@media (max-width: 560px) {
+  .settings-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+.settings-page p:not(.settings-message) {
   color: var(--app-text-muted);
 }
 </style>

@@ -1,0 +1,88 @@
+.money-spend-block {
+  margin: 0;
+}
+
+.money-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin-bottom: 10px;
+}
+
+.money-section-title {
+  margin: 0;
+}
+
+.money-section-toggle {
+  border: 1px solid var(--app-border-soft);
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  background: var(--app-surface-alt);
+  color: var(--app-primary, #2563eb);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.money-section-toggle:hover {
+  background: var(--app-primary-soft);
+  border-color: var(--app-primary, #2563eb);
+}
+
+.money-section-collapsed-hint {
+  margin: 0;
+}
+
+.money-section-panel .score-muted:first-child {
+  margin-top: 0;
+}
+
+.money-col-amount {
+  width: 7rem;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.money-col-action {
+  width: 5.5rem;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.money-col-rank {
+  width: 4rem;
+  text-align: center;
+}
+
+.money-col-percent {
+  width: 5rem;
+  text-align: right;
+}
+
+.money-delta {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.money-delta--gain {
+  color: #059669;
+}
+
+.money-delta--loss {
+  color: #dc2626;
+}
+
+.money-delta--zero {
+  color: var(--app-text-muted);
+}
+
+.app-shell.theme-dark .money-delta--gain {
+  color: #34d399;
+}
+
+.app-shell.theme-dark .money-delta--loss {
+  color: #f87171;
+}

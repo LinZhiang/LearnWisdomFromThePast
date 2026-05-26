@@ -17,17 +17,7 @@ type ChartTreeNode = {
 }
 
 const loading = ref(false)
-const selectedId = ref<number | null>(null)
-const editId = ref<number | null>(null)
-const form = ref({
-  name: '',
-  description: '',
-})
 const items = ref<LearningType[]>([])
-
-const selectedItem = computed(() =>
-  items.value.find((item) => item.id === selectedId.value),
-)
 
 const treeNodes = computed<LearningTypeNode[]>(() => {
   const map = new Map<number, LearningTypeNode>()
@@ -63,41 +53,27 @@ const runMutationAndRefresh = async (action: () => Promise<unknown>) => {
   await refreshItems()
 }
 
-const createType = async (parentId?: number) => {
-  if (!form.value.name.trim()) return
+const onCreate = async (payload: { parentId?: number; name: string; description: string }) => {
   const now = new Date().toISOString()
   await runMutationAndRefresh(() =>
     learningTypeService.create({
-      parentId,
-      name: form.value.name.trim(),
-      description: form.value.description.trim(),
+      parentId: payload.parentId,
+      name: payload.name,
+      description: payload.description,
       createdAt: now,
       updatedAt: now,
     }),
   )
-  form.value.name = ''
-  form.value.description = ''
 }
 
-const startEdit = (item: LearningType) => {
-  if (!item.id) return
-  editId.value = item.id
-  form.value.name = item.name
-  form.value.description = item.description ?? ''
-}
-
-const confirmEdit = async () => {
-  if (!editId.value || !form.value.name.trim()) return
+const onUpdate = async (payload: { id: number; name: string; description: string }) => {
   await runMutationAndRefresh(() =>
-    learningTypeService.update(editId.value!, {
-      name: form.value.name.trim(),
-      description: form.value.description.trim(),
+    learningTypeService.update(payload.id, {
+      name: payload.name,
+      description: payload.description,
       updatedAt: new Date().toISOString(),
     }),
   )
-  editId.value = null
-  form.value.name = ''
-  form.value.description = ''
 }
 
 const collectDescendantIds = (parentId: number, allItems: LearningType[]) => {
@@ -110,20 +86,16 @@ const collectDescendantIds = (parentId: number, allItems: LearningType[]) => {
   return descendantIds
 }
 
-const removeType = async (id?: number) => {
-  if (!id) return
+const onRemove = async (id: number) => {
   const allItems = await learningTypeService.listAll()
   const target = allItems.find((item) => item.id === id)
   if (!target) return
-  const ok = window.confirm(`确认删除「${target.name}」及其所有子类吗？`)
+  const ok = window.confirm(`确认删除「${target.name}」及其所有子节点吗？`)
   if (!ok) return
   const idsToDelete = [id, ...collectDescendantIds(id, allItems)]
   await runMutationAndRefresh(() =>
     Promise.all(idsToDelete.map((itemId) => learningTypeService.remove(itemId))),
   )
-  if (selectedId.value && idsToDelete.includes(selectedId.value)) {
-    selectedId.value = null
-  }
 }
 
 const mapToChartNode = (node: LearningTypeNode): ChartTreeNode => ({
@@ -133,10 +105,6 @@ const mapToChartNode = (node: LearningTypeNode): ChartTreeNode => ({
 })
 
 const chartData = computed(() => treeNodes.value.map((node) => mapToChartNode(node)))
-
-const updateForm = (value: { name: string; description: string }) => {
-  form.value = value
-}
 
 onMounted(async () => {
   await refreshItems()
@@ -148,24 +116,18 @@ onMounted(async () => {
     <header class="page-hero">
       <span class="page-kicker">智学 01</span>
       <h2 class="page-title">学习类型编辑</h2>
-      <p class="page-subtitle">点击左侧树节点后显示操作按钮，并同步展示 ECharts 树图。</p>
+      <p class="page-subtitle">
+        左侧管理分类树：添加根节点建立大类，选中节点后可添加子节点；右侧实时预览结构图。
+      </p>
     </header>
 
     <div class="type-layout">
       <LearningTypeEditorPanel
         :loading="loading"
         :tree-nodes="treeNodes"
-        :selected-id="selectedId"
-        :edit-id="editId"
-        :form="form"
-        :selected-item="selectedItem"
-        @update:selected-id="selectedId = $event"
-        @update:form="updateForm"
-        @create-parent="createType()"
-        @create-child="createType($event)"
-        @save-edit="confirmEdit"
-        @start-edit="startEdit"
-        @remove="removeType"
+        @create="onCreate"
+        @update="onUpdate"
+        @remove="onRemove"
       />
       <LearningTypeTreeChart :data="chartData" />
     </div>

@@ -1,5 +1,13 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
+import {
+  computeBackgroundFitCss,
+  createDefaultBackgroundImageFit,
+  isDataUrlBackground,
+  loadImageDimensions,
+  type BackgroundImageFit,
+  normalizeBackgroundImageFit,
+} from '@/utils/backgroundImageFit'
 
 export type ThemeStyle = 'light' | 'dark' | 'soft'
 
@@ -7,6 +15,8 @@ interface AppearanceSettings {
   backgroundColor: string
   backgroundOpacity: number
   backgroundImage: string
+  /** 本地 data URL 背景的取景（焦点、缩放） */
+  backgroundImageFit?: BackgroundImageFit | null
   /** 顶栏、卡片、设置页等使用 --app-surface / --app-surface-alt 的底色不透明度（0–1），不影响文字与内容图 */
   chromeOpacity: number
   themeStyle: ThemeStyle
@@ -19,8 +29,22 @@ const defaultSettings: AppearanceSettings = {
   backgroundColor: '#ffffff',
   backgroundOpacity: 1,
   backgroundImage: '',
+  backgroundImageFit: null,
   chromeOpacity: 0.92,
   themeStyle: 'light',
+}
+
+let viewportResizeBound = false
+
+function bindViewportResize(viewportW: { value: number }, viewportH: { value: number }) {
+  if (viewportResizeBound || typeof window === 'undefined') return
+  viewportResizeBound = true
+  const sync = () => {
+    viewportW.value = window.innerWidth
+    viewportH.value = window.innerHeight
+  }
+  window.addEventListener('resize', sync)
+  sync()
 }
 
 /** 切换整体风格时同步到设置里的「背景色」，与各主题画布/氛围一致（用户仍可再改）。 */
@@ -77,8 +101,13 @@ export const useAppearanceStore = defineStore('appearance', () => {
   const backgroundColor = ref(defaultSettings.backgroundColor)
   const backgroundOpacity = ref(defaultSettings.backgroundOpacity)
   const backgroundImage = ref(defaultSettings.backgroundImage)
+  const backgroundImageFit = ref<BackgroundImageFit | null>(defaultSettings.backgroundImageFit ?? null)
   const chromeOpacity = ref(defaultSettings.chromeOpacity)
   const themeStyle = ref<ThemeStyle>(defaultSettings.themeStyle)
+  const viewportWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 1920)
+  const viewportHeight = ref(typeof window !== 'undefined' ? window.innerHeight : 1080)
+
+  bindViewportResize(viewportWidth, viewportHeight)
 
   const shellClass = computed(() => `theme-${themeStyle.value}`)
 
@@ -92,12 +121,18 @@ export const useAppearanceStore = defineStore('appearance', () => {
     const tintLayer = `linear-gradient(${tint}, ${tint})`
     const img = backgroundImage.value.trim()
     if (img) {
+      const fit = backgroundImageFit.value
+      const useFit = fit && isDataUrlBackground(img) && fit.intrinsicWidth > 0
+      const layer =
+        useFit ?
+          computeBackgroundFitCss(fit, viewportWidth.value, viewportHeight.value)
+        : { backgroundSize: 'cover', backgroundPosition: 'center center' }
       return {
         backgroundColor: 'transparent',
         backgroundImage: `${tintLayer}, url("${img}"), ${canvasLayer}`,
-        backgroundSize: '100% 100%, cover, auto',
+        backgroundSize: `100% 100%, ${layer.backgroundSize}, auto`,
         backgroundRepeat: 'no-repeat, no-repeat, no-repeat',
-        backgroundPosition: 'center, center, center',
+        backgroundPosition: `center, ${layer.backgroundPosition}, center`,
       }
     }
     return {
@@ -119,6 +154,7 @@ export const useAppearanceStore = defineStore('appearance', () => {
       backgroundColor: backgroundColor.value,
       backgroundOpacity: backgroundOpacity.value,
       backgroundImage: backgroundImage.value,
+      backgroundImageFit: backgroundImageFit.value,
       chromeOpacity: chromeOpacity.value,
       themeStyle: themeStyle.value,
     }
@@ -160,6 +196,17 @@ export const useAppearanceStore = defineStore('appearance', () => {
           : defaultSettings.backgroundOpacity,
       )
       backgroundImage.value = parsed.backgroundImage ?? defaultSettings.backgroundImage
+      const img = backgroundImage.value.trim()
+      const rawFit = parsed.backgroundImageFit
+      if (rawFit && isDataUrlBackground(img)) {
+        backgroundImageFit.value = normalizeBackgroundImageFit(
+          rawFit,
+          rawFit.intrinsicWidth ?? 1920,
+          rawFit.intrinsicHeight ?? 1080,
+        )
+      } else {
+        backgroundImageFit.value = null
+      }
       chromeOpacity.value = clampOpacity(
         typeof parsed.chromeOpacity === 'number'
           ? parsed.chromeOpacity
@@ -178,6 +225,7 @@ export const useAppearanceStore = defineStore('appearance', () => {
       backgroundColor.value = defaultSettings.backgroundColor
       backgroundOpacity.value = defaultSettings.backgroundOpacity
       backgroundImage.value = defaultSettings.backgroundImage
+      backgroundImageFit.value = defaultSettings.backgroundImageFit ?? null
       chromeOpacity.value = defaultSettings.chromeOpacity
       themeStyle.value = defaultSettings.themeStyle
       applyAppearanceThemeToDocument(themeStyle.value)
@@ -198,12 +246,48 @@ export const useAppearanceStore = defineStore('appearance', () => {
   const updateBackgroundImage = (value: string): boolean => {
     const next = value.trim()
     const prev = backgroundImage.value
+    const prevFit = backgroundImageFit.value
     backgroundImage.value = next
+    if (!next || !isDataUrlBackground(next)) {
+      backgroundImageFit.value = null
+    } else if (prev !== next) {
+      backgroundImageFit.value = null
+    }
     if (!save()) {
       backgroundImage.value = prev
+      backgroundImageFit.value = prevFit
       return false
     }
     return true
+  }
+
+  const updateBackgroundImageFit = (fit: BackgroundImageFit | null): boolean => {
+    const prev = backgroundImageFit.value
+    const img = backgroundImage.value.trim()
+    if (!img || !isDataUrlBackground(img)) {
+      backgroundImageFit.value = null
+      return save()
+    }
+    backgroundImageFit.value = normalizeBackgroundImageFit(
+      fit ?? createDefaultBackgroundImageFit(1920, 1080),
+      fit?.intrinsicWidth ?? 1920,
+      fit?.intrinsicHeight ?? 1080,
+    )
+    if (!save()) {
+      backgroundImageFit.value = prev
+      return false
+    }
+    return true
+  }
+
+  const initBackgroundImageFitFromUrl = async (src: string): Promise<boolean> => {
+    if (!isDataUrlBackground(src)) return false
+    try {
+      const { width, height } = await loadImageDimensions(src)
+      return updateBackgroundImageFit(createDefaultBackgroundImageFit(width, height))
+    } catch {
+      return updateBackgroundImageFit(createDefaultBackgroundImageFit(1920, 1080))
+    }
   }
 
   const updateChromeOpacity = (value: number) => {
@@ -222,6 +306,7 @@ export const useAppearanceStore = defineStore('appearance', () => {
     backgroundColor.value = defaultSettings.backgroundColor
     backgroundOpacity.value = defaultSettings.backgroundOpacity
     backgroundImage.value = defaultSettings.backgroundImage
+    backgroundImageFit.value = defaultSettings.backgroundImageFit ?? null
     chromeOpacity.value = defaultSettings.chromeOpacity
     themeStyle.value = defaultSettings.themeStyle
     applyAppearanceThemeToDocument(themeStyle.value)
@@ -232,6 +317,7 @@ export const useAppearanceStore = defineStore('appearance', () => {
     backgroundColor,
     backgroundOpacity,
     backgroundImage,
+    backgroundImageFit,
     chromeOpacity,
     themeStyle,
     shellClass,
@@ -242,6 +328,8 @@ export const useAppearanceStore = defineStore('appearance', () => {
     updateBackgroundColor,
     updateBackgroundOpacity,
     updateBackgroundImage,
+    updateBackgroundImageFit,
+    initBackgroundImageFitFromUrl,
     updateChromeOpacity,
     updateThemeStyle,
     reset,

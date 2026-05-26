@@ -5,12 +5,15 @@ import { marked } from 'marked'
 import { computed, ref } from 'vue'
 import type { QuestionBank } from '@/db/models'
 import { isAiChatConfigured, requestQuestionKeywordFollowup } from '@/services/deepseek'
+import { hashForAiCache, rememberAiResponse } from '@/utils/aiResponseCache'
 import { parseChoiceQuestionContent } from '@/utils/choiceQuestion'
 import { htmlToPlainText } from '@/utils/htmlToText'
 
 const props = defineProps<{
   question: QuestionBank
   typeLabel: string
+  /** 思维导图详情等场景：侧栏撑满高度，仅「回答」区滚动，避免双层滚动条 */
+  fillHeight?: boolean
 }>()
 
 const keywordInput = ref('')
@@ -72,12 +75,18 @@ const onAsk = async () => {
   error.value = ''
   loading.value = true
   try {
-    answer.value = await requestQuestionKeywordFollowup({
-      typeLabel: props.typeLabel,
-      title: props.question.title ?? '',
-      materialPlainText: materialPlain.value,
-      userKeywords: keywordInput.value,
-    })
+    answer.value = await rememberAiResponse(
+      `keyword:${props.question.id ?? 'x'}:${hashForAiCache(
+        [props.typeLabel, materialPlain.value, keywordInput.value.trim()].join('\0'),
+      )}`,
+      () =>
+        requestQuestionKeywordFollowup({
+          typeLabel: props.typeLabel,
+          title: props.question.title ?? '',
+          materialPlainText: materialPlain.value,
+          userKeywords: keywordInput.value,
+        }),
+    )
   } catch (e) {
     const msg = e instanceof Error ? e.message : '请求失败'
     error.value = msg
@@ -89,15 +98,22 @@ const onAsk = async () => {
 </script>
 
 <template>
-  <aside class="keyword-panel" aria-label="DeepSeek 关键字追问">
+  <aside
+    class="keyword-panel"
+    :class="{ 'keyword-panel--fill': fillHeight }"
+    aria-label="DeepSeek 关键字追问"
+  >
     <header class="keyword-panel-head">
       <h3 class="keyword-panel-title">DeepSeek 关键字追问</h3>
       <p class="keyword-panel-desc">
         结合本题材料，输入你想了解的关键词或一句话问题，由 DeepSeek 针对性说明。
       </p>
     </header>
-    <!-- 固定上限 + overflow，不依赖外层 flex 高度是否传下来 -->
-    <div class="keyword-panel-scroll" tabindex="-1" aria-label="关键字追问与回答">
+    <div
+      class="keyword-panel-main"
+      :tabindex="fillHeight ? undefined : -1"
+      :aria-label="fillHeight ? undefined : '关键字追问与回答'"
+    >
       <div class="keyword-panel-form">
         <el-input
           v-model="keywordInput"
@@ -137,11 +153,17 @@ const onAsk = async () => {
   flex-direction: column;
   width: 100%;
   max-width: 360px;
+  min-height: 0;
   border: 1px solid var(--app-border-soft);
   border-radius: 12px;
   background: var(--app-surface);
   box-sizing: border-box;
   overflow: hidden;
+}
+
+.keyword-panel--fill {
+  height: 100%;
+  max-height: 100%;
 }
 
 .keyword-panel-head {
@@ -165,11 +187,41 @@ const onAsk = async () => {
   color: var(--app-text-muted);
 }
 
-.keyword-panel-scroll {
+.keyword-panel-main {
   max-height: min(62dvh, calc(100dvh - 13rem));
   overflow-x: hidden;
   overflow-y: auto;
   padding: 12px 14px 14px;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}
+
+.keyword-panel--fill .keyword-panel-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.keyword-panel--fill .keyword-panel-form {
+  flex-shrink: 0;
+  padding: 12px 14px 10px;
+}
+
+.keyword-panel--fill .keyword-answer {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 0;
+  border: none;
+  border-top: 1px solid var(--app-border-soft);
+  border-radius: 0;
+  padding: 10px 14px 14px;
+  background: var(--app-surface-alt);
+  overflow-x: hidden;
+  overflow-y: auto;
   scrollbar-gutter: stable;
   -webkit-overflow-scrolling: touch;
 }

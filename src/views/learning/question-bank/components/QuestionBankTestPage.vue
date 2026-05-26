@@ -7,7 +7,7 @@ import {
 } from '@/services/favorite-question-helpers'
 import { useQuestionBankTest } from '../composables/useQuestionBankTest'
 import type { QuestionBankTestLogMenuOrigin } from '@/utils/questionBankTestLog'
-import type { TestUnit } from './questionBankTestTypes'
+import type { QuestionBankTestBuildConfig, TestUnit } from './questionBankTestTypes'
 import QuestionBankTestGeneralUnit from './QuestionBankTestGeneralUnit.vue'
 import QuestionBankTestMcqUnit from './QuestionBankTestMcqUnit.vue'
 import QuestionBankTestRunningScoreBanner from './QuestionBankTestRunningScoreBanner.vue'
@@ -21,14 +21,18 @@ const props = withDefaults(
     learningTypeId: number | null
     /** 是否从学习题库「测试全部」进入（用于整库全对奖励） */
     testScopeAll?: boolean
+    /** 测验全对时播放音乐并弹窗（不写题库全对标签） */
+    celebrateSessionPerfect?: boolean
     questions: QuestionBank[]
+    /** 学习题库测验构建配置 */
+    testBuildConfig?: QuestionBankTestBuildConfig
     /** 收藏页可传入预置测试单元（如导图衍生小题） */
     presetUnits?: TestUnit[]
     loading: boolean
     typeTextMap: Record<QuestionBank['type'], string>
     logMenuOrigin?: QuestionBankTestLogMenuOrigin
   }>(),
-  { testScopeAll: false, logMenuOrigin: 'learning-question-bank' },
+  { testScopeAll: false, celebrateSessionPerfect: false, logMenuOrigin: 'learning-question-bank' },
 )
 
 const emit = defineEmits<{
@@ -114,7 +118,7 @@ const currentMaxScore = computed(() =>
       </template>
       <template v-else-if="qb.phase === 'building'">
         <p class="test-muted">{{ qb.buildStatus }}</p>
-        <p class="test-hint">
+        <p v-if="!testBuildConfig" class="test-hint">
           正在调用 DeepSeek 生成干扰项与思维导图小题（约 5～10 道，以加粗考点为主），请稍候。
         </p>
       </template>

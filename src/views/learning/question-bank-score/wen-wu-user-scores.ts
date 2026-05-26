@@ -1,3 +1,5 @@
+import { processRankUpgradeMoneyBonus } from '@/services/money-rank-upgrade-bonus'
+
 const STORAGE_KEY = 'wen-wu-user-scores-v1'
 
 /** 任意写入文武分后派发，供界面同步刷新 */
@@ -31,8 +33,20 @@ export function loadWenWuUserScores(): WenWuUserScores {
 }
 
 export function saveWenWuUserScores(scores: WenWuUserScores): void {
+  const prev = loadWenWuUserScores()
   localStorage.setItem(STORAGE_KEY, JSON.stringify(scores))
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent(WEN_WU_SCORES_CHANGED_EVENT))
   }
+  if (prev.wenScore !== scores.wenScore || prev.wuScore !== scores.wuScore) {
+    processRankUpgradeMoneyBonus(prev, scores)
+  }
+}
+
+/** 增减本机金钱，返回变动后的余额 */
+export function applyMoneyDelta(delta: number): number {
+  const cur = loadWenWuUserScores()
+  const money = cur.money + delta
+  saveWenWuUserScores({ ...cur, money })
+  return money
 }

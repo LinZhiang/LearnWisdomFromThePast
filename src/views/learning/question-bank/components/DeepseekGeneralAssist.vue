@@ -10,6 +10,7 @@ import {
   requestGeneralMistakeAwareSolve,
   requestQuestionSolve,
 } from '@/services/deepseek'
+import { hashForAiCache, rememberAiResponse } from '@/utils/aiResponseCache'
 
 const props = defineProps<{
   title: string
@@ -107,38 +108,55 @@ const onSolve = async () => {
   error.value = ''
   loading.value = true
   try {
-    if (isChoiceMistake.value) {
-      answer.value = await requestChoiceMistakeAwareSolve({
+    const cacheKey = `assist:${hashForAiCache(
+      JSON.stringify({
         title: props.title,
-        stem: props.choiceStem,
-        options: props.choiceOptions ?? [],
-        correctAnswerTexts: [...(props.choiceCorrectAnswers ?? [])],
-        userSelectedTexts: [...(props.choiceUserSelectedTexts ?? [])],
-        analysisHtml: props.analysisHtml,
-      })
-    } else if (isGeneralMistake.value) {
-      answer.value = await requestGeneralMistakeAwareSolve({
-        title: props.title,
+        analysisHtml: props.analysisHtml ?? '',
         contentHtml: props.contentHtml ?? '',
-        analysisHtml: props.analysisHtml,
-        userAnswerHtml: props.reflectiveUserAnswerHtml ?? '',
-      })
-    } else if (isChoiceAssist.value) {
-      answer.value = await requestQuestionSolve({
-        kind: 'choice',
-        title: props.title,
-        mode: props.choiceMode!,
-        correctAnswers: [...props.choiceCorrectAnswers!],
-        analysisHtml: props.analysisHtml,
-      })
-    } else {
-      answer.value = await requestQuestionSolve({
+        choiceMode: props.choiceMode,
+        choiceCorrectAnswers: props.choiceCorrectAnswers,
+        choiceOptions: props.choiceOptions,
+        choiceStem: props.choiceStem,
+        mistakeAware: props.mistakeAware,
+        reflectiveUserAnswerHtml: props.reflectiveUserAnswerHtml,
+        choiceUserSelectedTexts: props.choiceUserSelectedTexts,
+      }),
+    )}`
+    answer.value = await rememberAiResponse(cacheKey, async () => {
+      if (isChoiceMistake.value) {
+        return requestChoiceMistakeAwareSolve({
+          title: props.title,
+          stem: props.choiceStem,
+          options: props.choiceOptions ?? [],
+          correctAnswerTexts: [...(props.choiceCorrectAnswers ?? [])],
+          userSelectedTexts: [...(props.choiceUserSelectedTexts ?? [])],
+          analysisHtml: props.analysisHtml,
+        })
+      }
+      if (isGeneralMistake.value) {
+        return requestGeneralMistakeAwareSolve({
+          title: props.title,
+          contentHtml: props.contentHtml ?? '',
+          analysisHtml: props.analysisHtml,
+          userAnswerHtml: props.reflectiveUserAnswerHtml ?? '',
+        })
+      }
+      if (isChoiceAssist.value) {
+        return requestQuestionSolve({
+          kind: 'choice',
+          title: props.title,
+          mode: props.choiceMode!,
+          correctAnswers: [...props.choiceCorrectAnswers!],
+          analysisHtml: props.analysisHtml,
+        })
+      }
+      return requestQuestionSolve({
         kind: 'general',
         title: props.title,
         contentHtml: props.contentHtml ?? '',
         analysisHtml: props.analysisHtml,
       })
-    }
+    })
   } catch (e) {
     const msg = e instanceof Error ? e.message : '请求失败'
     error.value = msg

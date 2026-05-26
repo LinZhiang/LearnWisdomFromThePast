@@ -8,16 +8,25 @@ import LearningTypeTreePanel from '@/components/LearningTypeTreePanel.vue'
 import QuestionBankDetailPage from './components/QuestionBankDetailPage.vue'
 import QuestionBankEditorPage from './components/QuestionBankEditorPage.vue'
 import QuestionBankTestEntryDialog from './components/QuestionBankTestEntryDialog.vue'
+import QuestionBankTestParentEntryDialog from './components/QuestionBankTestParentEntryDialog.vue'
 import QuestionBankTestPage from './components/QuestionBankTestPage.vue'
 import {
   LEARNING_TYPE_QB_PERFECT_CLEARED_CHANGED,
   loadPerfectClearedLearningTypeIds,
 } from '@/services/learning-type-qb-perfect-cleared'
+import {
+  collectLeafDescendants,
+  findLearningTypeNodeById,
+  type LearningTypeTreeNode,
+} from '@/utils/learningTypeTree'
+import { sumQuestionBankTestUnitCounts } from '@/utils/questionBankTestCount'
+import type {
+  QuestionBankTestBuildConfig,
+  QuestionBankTestEntryPayload,
+  QuestionBankTestLeafEntryPayload,
+} from './components/questionBankTestTypes'
 
-type LearningTypeNode = LearningType & {
-  level: number
-  children: LearningTypeNode[]
-}
+type LearningTypeNode = LearningTypeTreeNode
 
 const learningTypes = ref<LearningType[]>([])
 const questionBanks = ref<QuestionBank[]>([])
@@ -29,10 +38,15 @@ const showEditor = ref(false)
 const viewingQuestion = ref<QuestionBank | null>(null)
 const showQuestionTest = ref(false)
 const showTestEntryDialog = ref(false)
-/** 进入测验页时使用的题目列表（全部或勾选子集） */
+const showParentTestEntryDialog = ref(false)
+/** 进入测验页时使用的题目列表（符合筛选条件的全部候选） */
 const testPageQuestions = ref<QuestionBank[]>([])
-/** 本次测验是否来自「测试全部」 */
+/** 测验构建配置（小项覆盖 + 题量） */
+const testBuildConfig = ref<QuestionBankTestBuildConfig | undefined>(undefined)
+/** 本次测验是否来自「测试全部」（单叶子节点、全部小项/题型/题量） */
 const testScopeAll = ref(false)
+/** 测验全对时播放音乐并弹窗（不写入题库全对标签） */
+const celebrateSessionPerfect = ref(true)
 const perfectClearedLearningTypeIds = ref<number[]>([])
 const submitting = ref(false)
 const editorInitialForm = ref({
@@ -52,12 +66,44 @@ const form = ref({
   analysis: '',
 })
 
+const selectedNode = computed(() => {
+  const id = selectedLearningTypeId.value
+  if (id == null) return null
+  return findLearningTypeNodeById(treeNodes.value, id)
+})
+
+const descendantLeafNodes = computed(() => {
+  const node = selectedNode.value
+  if (!node) return []
+  return collectLeafDescendants(node)
+})
+
+const descendantLeafIds = computed(() =>
+  descendantLeafNodes.value.map((n) => n.id).filter((id): id is number => id != null),
+)
+
+const isParentNodeSelected = computed(() => (selectedNode.value?.children.length ?? 0) > 0)
+
 const filteredQuestionBanks = computed(() => {
-  if (!selectedLearningTypeId.value) return []
+  if (descendantLeafIds.value.length === 0) return []
+  const idSet = new Set(descendantLeafIds.value)
   return questionBanks.value.filter(
-    (item) => item.learningTypeId === selectedLearningTypeId.value,
+    (item) => item.learningTypeId != null && idSet.has(item.learningTypeId),
   )
 })
+
+const testEntryLeafOptions = computed(() =>
+  descendantLeafNodes.value
+    .filter((n): n is LearningTypeNode & { id: number } => n.id != null)
+    .map((n) => {
+      const qs = questionBanks.value.filter((q) => q.learningTypeId === n.id)
+      return {
+        id: n.id,
+        name: n.name,
+        questionCount: sumQuestionBankTestUnitCounts(qs),
+      }
+    }),
+)
 
 const typeTextMap: Record<QuestionBank['type'], string> = {
   general: '一般题型',
@@ -76,7 +122,7 @@ const selectedLearningTypeName = computed(() =>
 
 const selectedLearningTypePerfectCleared = computed(() => {
   const id = selectedLearningTypeId.value
-  if (id == null) return false
+  if (id == null || isParentNodeSelected.value) return false
   return perfectClearedLearningTypeIds.value.includes(id)
 })
 
@@ -283,8 +329,10 @@ const removeItem = async (id?: number) => {
 }
 
 const startCreate = () => {
-  if (!selectedLearningTypeId.value) {
-    message.value = '请先在左侧选择学习类型节点。'
+  if (!selectedLearningTypeId.value || isParentNodeSelected.value) {
+    message.value = isParentNodeSelected.value
+      ? '父节点不能直接新增题目，请选择具体小项。'
+      : '请先在左侧选择学习类型节点。'
     return
   }
   editingId.value = null
@@ -315,35 +363,75 @@ const openQuestionTest = () => {
     message.value = '请先在左侧树中选择学习类型。'
     return
   }
+  if (isParentNodeSelected.value) {
+    if (testEntryLeafOptions.value.length === 0) {
+      message.value = '当前节点下没有可测试的小项。'
+      return
+    }
+    showParentTestEntryDialog.value = true
+    return
+  }
+  if (filteredQuestionBanks.value.length === 0) {
+    message.value = '当前节点下没有可测试的题目。'
+    return
+  }
   showTestEntryDialog.value = true
 }
 
-const onTestEntryConfirm = (
-  payload: { scope: 'all' } | { scope: 'partial'; questionIds: number[] },
-) => {
+const onLeafTestEntryConfirm = (payload: QuestionBankTestLeafEntryPayload) => {
   resetForm()
   viewingQuestion.value = null
   testScopeAll.value = payload.scope === 'all'
-  let list: QuestionBank[]
-  if (payload.scope === 'all') {
-    list = [...filteredQuestionBanks.value]
-  } else {
-    const idSet = new Set(payload.questionIds)
-    list = filteredQuestionBanks.value.filter((q) => q.id != null && idSet.has(q.id))
-  }
+  celebrateSessionPerfect.value = false
+  const list =
+    payload.scope === 'all'
+      ? filteredQuestionBanks.value.filter((q) => q.id != null)
+      : filteredQuestionBanks.value.filter(
+          (q) => q.id != null && payload.questionIds.includes(q.id),
+        )
   if (list.length === 0) {
-    message.value = '没有可测试的题目，请勾选至少一道题目。'
+    message.value = '没有可测试的题目。'
     return
   }
   testPageQuestions.value = list
+  testBuildConfig.value = undefined
   showTestEntryDialog.value = false
+  showQuestionTest.value = true
+}
+
+function poolQuestionsForTest(payload: QuestionBankTestEntryPayload): QuestionBank[] {
+  const leafSet = new Set(payload.learningTypeIds)
+  return filteredQuestionBanks.value.filter((q) => {
+    if (q.id == null || q.learningTypeId == null) return false
+    if (!leafSet.has(q.learningTypeId)) return false
+    const t = q.type ?? 'general'
+    if (t === 'general') return payload.includeGeneral
+    return payload.includeChoiceLike
+  })
+}
+
+const onParentTestEntryConfirm = (payload: QuestionBankTestEntryPayload) => {
+  resetForm()
+  viewingQuestion.value = null
+  const list = poolQuestionsForTest(payload)
+  if (list.length === 0 || payload.questionCount < 1) {
+    message.value = '没有可测试的题目，请调整小项、题型或出题数量。'
+    return
+  }
+  testScopeAll.value = false
+  celebrateSessionPerfect.value = true
+  testPageQuestions.value = list
+  testBuildConfig.value = payload
+  showParentTestEntryDialog.value = false
   showQuestionTest.value = true
 }
 
 const closeQuestionTest = () => {
   showQuestionTest.value = false
   testPageQuestions.value = []
+  testBuildConfig.value = undefined
   testScopeAll.value = false
+  celebrateSessionPerfect.value = true
   refreshPerfectClearedIds()
 }
 
@@ -396,9 +484,11 @@ onBeforeUnmount(() => {
     <QuestionBankTestPage
       v-else-if="showQuestionTest"
       :learning-type-name="selectedLearningTypeName"
-      :learning-type-id="selectedLearningTypeId"
+      :learning-type-id="isParentNodeSelected ? null : selectedLearningTypeId"
       :test-scope-all="testScopeAll"
+      :celebrate-session-perfect="celebrateSessionPerfect"
       :questions="testPageQuestions"
+      :test-build-config="testBuildConfig"
       :loading="loading"
       :type-text-map="typeTextMap"
       @back="closeQuestionTest"
@@ -423,7 +513,7 @@ onBeforeUnmount(() => {
         :loading="loading"
         :tree-nodes="treeNodes"
         :selected-id="selectedLearningTypeId"
-        :leaf-selectable-only="true"
+        :leaf-selectable-only="false"
         :perfect-cleared-ids="perfectClearedLearningTypeIds"
         @update:selected-id="selectedLearningTypeId = $event"
       />
@@ -443,26 +533,49 @@ onBeforeUnmount(() => {
             </el-tag>
           </p>
           <div class="question-bank-header-actions">
-            <el-button @click="openQuestionTest">题目测试</el-button>
-            <el-button type="primary" @click="startCreate">新增</el-button>
+            <el-button
+              :disabled="
+                isParentNodeSelected
+                  ? testEntryLeafOptions.length === 0
+                  : filteredQuestionBanks.length === 0
+              "
+              @click="openQuestionTest"
+            >
+              题目测试
+            </el-button>
+            <el-button
+              v-if="!isParentNodeSelected"
+              type="primary"
+              @click="startCreate"
+            >
+              新增
+            </el-button>
           </div>
         </div>
         <p v-if="loading">题库数据加载中...</p>
         <p v-if="message">{{ message }}</p>
         <p v-if="!selectedLearningTypeId">请先从左侧树中选择学习类型。</p>
         <template v-else>
-          <p v-if="!loading && filteredQuestionBanks.length === 0">当前类型下暂无题目。</p>
-          <div class="question-table">
-            <div class="question-table-head">
+          <p v-if="isParentNodeSelected && !loading" class="parent-node-hint">
+            父节点汇总 {{ descendantLeafNodes.length }} 个小项，共 {{ filteredQuestionBanks.length }} 道题。可点击「题目测试」跨小项测验；新增题目请选择具体小项。
+          </p>
+          <p v-if="!loading && filteredQuestionBanks.length === 0">当前节点下暂无题目。</p>
+          <div v-if="filteredQuestionBanks.length > 0" class="question-table">
+            <div
+              class="question-table-head"
+              :class="{ 'has-leaf-column': isParentNodeSelected }"
+            >
               <span>题目名称</span>
+              <span v-if="isParentNodeSelected">所属小项</span>
               <span>题型</span>
               <span>分数</span>
-              <span>操作</span>
+              <span v-if="!isParentNodeSelected">操作</span>
             </div>
             <div
               v-for="item in filteredQuestionBanks"
               :key="item.id"
               class="question-table-row is-row-open-detail"
+              :class="{ 'has-leaf-column': isParentNodeSelected }"
               role="button"
               tabindex="0"
               @click="openQuestionDetail(item)"
@@ -470,9 +583,12 @@ onBeforeUnmount(() => {
               @keydown.space.prevent="openQuestionDetail(item)"
             >
               <span>{{ item.title }}</span>
+              <span v-if="isParentNodeSelected">{{
+                getLearningTypeName(item.learningTypeId)
+              }}</span>
               <span>{{ typeTextMap[item.type ?? 'general'] }}</span>
               <span>{{ item.type === 'mindmap' ? '-' : (item.score ?? 0) }}</span>
-              <div class="question-card-actions" @click.stop>
+              <div v-if="!isParentNodeSelected" class="question-card-actions" @click.stop>
                 <el-button size="small" @click="startEdit(item)">修改</el-button>
                 <el-button size="small" type="danger" @click="removeItem(item.id)">
                   删除
@@ -486,9 +602,17 @@ onBeforeUnmount(() => {
     </template>
     <QuestionBankTestEntryDialog
       v-model="showTestEntryDialog"
+      :node-name="selectedLearningTypeName"
       :questions="filteredQuestionBanks"
       :type-text-map="typeTextMap"
-      @confirm="onTestEntryConfirm"
+      @confirm="onLeafTestEntryConfirm"
+    />
+    <QuestionBankTestParentEntryDialog
+      v-model="showParentTestEntryDialog"
+      :node-name="selectedLearningTypeName"
+      :leaf-options="testEntryLeafOptions"
+      :all-questions="filteredQuestionBanks"
+      @confirm="onParentTestEntryConfirm"
     />
   </section>
 </template>
@@ -549,10 +673,6 @@ onBeforeUnmount(() => {
   margin: 0;
 }
 
-.perfect-cleared-tag {
-  vertical-align: middle;
-}
-
 .question-bank-header-actions {
   display: flex;
   align-items: center;
@@ -575,6 +695,18 @@ onBeforeUnmount(() => {
   align-items: center;
   padding: 8px 10px;
   gap: 8px;
+}
+
+.question-table-head.has-leaf-column,
+.question-table-row.has-leaf-column {
+  grid-template-columns: 1.2fr 0.8fr 0.6fr 0.4fr;
+}
+
+.parent-node-hint {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
 }
 
 .question-table-head {

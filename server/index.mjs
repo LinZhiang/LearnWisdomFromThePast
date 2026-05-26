@@ -7,6 +7,11 @@ import express from 'express'
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import {
+  appendAiRequestLog,
+  readRecentAiRequestLogs,
+  summarizeRecentLogs,
+} from './ai-request-log.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const envFile = path.join(__dirname, '.env')
@@ -39,13 +44,29 @@ const corsMiddleware =
   : cors({ origin: true })
 
 app.use(corsMiddleware)
-app.use(express.json({ limit: '4mb' }))
+app.use(express.json({ limit: '32mb' }))
 
 app.get('/health', (_req, res) => {
   res.json({
     ok: true,
     hasApiKey: Boolean(DEEPSEEK_KEY),
     upstream: UPSTREAM,
+  })
+})
+
+/** 最近 AI 请求汇总（供 npm run check:ai / 助手排查，不含密钥） */
+app.get('/status/summary', (_req, res) => {
+  const recent = readRecentAiRequestLogs(50)
+  const summary = summarizeRecentLogs(recent)
+  res.json({
+    ok: true,
+    hasApiKey: Boolean(DEEPSEEK_KEY),
+    upstream: UPSTREAM,
+    port: PORT,
+    recentCount: recent.length,
+    lastRequestAt: recent.at(-1)?.at ?? null,
+    ...summary,
+    recent: recent.slice(-10),
   })
 })
 
@@ -60,6 +81,15 @@ app.post('/v1/chat/completions', async (req, res) => {
     return
   }
 
+  const body = req.body ?? {}
+  const source = String(req.headers['x-wengu-ai-source'] ?? 'unknown').slice(0, 64)
+  const model = String(body.model ?? '(unset)').slice(0, 64)
+  // eslint-disable-next-line no-console
+  console.log(`[wengu-ai-proxy] model=${model} source=${source}`)
+
+  let upstreamStatus = 0
+  let usage = null
+
   try {
     const upstreamRes = await fetch(`${UPSTREAM}/chat/completions`, {
       method: 'POST',
@@ -67,14 +97,42 @@ app.post('/v1/chat/completions', async (req, res) => {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${DEEPSEEK_KEY}`,
       },
-      body: JSON.stringify(req.body ?? {}),
+      body: JSON.stringify(body),
     })
 
+    upstreamStatus = upstreamRes.status
     const ct = upstreamRes.headers.get('content-type') || 'application/json'
     const buf = Buffer.from(await upstreamRes.arrayBuffer())
+
+    if (ct.includes('json')) {
+      try {
+        const parsed = JSON.parse(buf.toString('utf8'))
+        usage = parsed.usage ?? null
+      } catch {
+        /* ignore */
+      }
+    }
+
+    appendAiRequestLog({
+      model,
+      source,
+      status: upstreamStatus,
+      ok: upstreamStatus >= 200 && upstreamStatus < 300,
+      promptTokens: usage?.prompt_tokens ?? null,
+      completionTokens: usage?.completion_tokens ?? null,
+      totalTokens: usage?.total_tokens ?? null,
+    })
+
     res.status(upstreamRes.status).type(ct).send(buf)
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'upstream fetch failed'
+    appendAiRequestLog({
+      model,
+      source,
+      status: 502,
+      ok: false,
+      error: msg,
+    })
     // eslint-disable-next-line no-console
     console.error('[wengu-ai-proxy] 访问上游失败（常见原因：本机网络/DNS、未开代理、或 DeepSeek 地址不可达）:', e)
     res.status(502).json({

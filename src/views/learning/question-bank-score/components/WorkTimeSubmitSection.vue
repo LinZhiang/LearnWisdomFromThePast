@@ -3,7 +3,7 @@ import type { WorkTimeLog } from '@/db/models'
 
 defineProps<{
   workDateKey: string
-  workMinutes: number | undefined
+  workHours: number | undefined
   workKind: WorkTimeLog['kind']
   workNote: string
   submitting: boolean
@@ -11,7 +11,7 @@ defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:workDateKey', v: string): void
-  (e: 'update:workMinutes', v: number | undefined): void
+  (e: 'update:workHours', v: number | undefined): void
   (e: 'update:workKind', v: WorkTimeLog['kind']): void
   (e: 'update:workNote', v: string): void
   (e: 'submit'): void
@@ -22,8 +22,8 @@ const emit = defineEmits<{
   <div class="score-section">
     <h3 class="score-section-title">今日工作登记</h3>
     <p class="score-muted">
-      若当天有工作安排，请填写<strong>本次</strong>工作/出差时长并选择类型后提交；可多次添加（如上午、下午分段）。折算规则：「工作」按登记分钟累计；「出差」按<strong>登记分钟
-      ×1.15</strong>计入工作分后再累计。折算分每满 <strong>1 小时</strong>为<strong>文分 +12、武分 +14</strong>（余数滚入下次，与「我的文武累计分」同源）。
+      若当天有工作安排，请填写<strong>本次</strong>工作/出差时长（小时，最小 0.5）并选择类型后提交；可多次添加。折算规则：「工作」按登记时长累计；「出差」按<strong>登记时长
+      ×1.15</strong>计入后再累计。折算分每满 <strong>1 小时</strong>为<strong>文分 +12、武分 +14</strong>（余数滚入下次，与「我的文武累计分」同源）。
     </p>
     <div class="score-work-form">
       <label class="score-field">
@@ -38,15 +38,16 @@ const emit = defineEmits<{
         />
       </label>
       <label class="score-field">
-        <span>时长（分钟）</span>
+        <span>时长（小时）</span>
         <el-input-number
-          :model-value="workMinutes"
-          :min="1"
-          :max="1440"
-          :step="15"
+          :model-value="workHours"
+          :min="0.5"
+          :max="24"
+          :step="0.5"
+          :precision="1"
           controls-position="right"
           style="width: 100%"
-          @update:model-value="emit('update:workMinutes', $event)"
+          @update:model-value="emit('update:workHours', $event)"
         />
       </label>
       <div class="score-field score-field--inline">

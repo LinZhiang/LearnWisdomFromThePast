@@ -1,5 +1,15 @@
 /// <reference types="vite/client" />
 
+declare module '*.MID' {
+  const src: string
+  export default src
+}
+
+declare module '*.mid' {
+  const src: string
+  export default src
+}
+
 interface ImportMetaEnv {
   /**
    * AI 代理 OpenAI 兼容根路径，须以 `/v1` 结尾、无尾部斜杠。

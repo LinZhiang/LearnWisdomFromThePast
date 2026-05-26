@@ -7,18 +7,22 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import type { QuestionBank } from '@/db/models'
 import { answerLogService } from '@/services/data-services'
 import {
+  markWrongQuestionReviewedByTarget,
   recordWrongBookFullScoreQuizPass,
   upsertWrongQuestionFromAnswer,
   wrongTargetFromTestUnit,
+  type WrongQuestionTarget,
 } from '@/services/wrong-question-helpers'
 import type { QuizRadarDimension } from '@/services/deepseek'
 import {
   isAiChatConfigured,
-  requestChoiceDistractors,
   requestChoiceTestAssist,
-  requestMindmapDerivedMcqs,
   requestQuizRadarAnalysis,
 } from '@/services/deepseek'
+import {
+  fetchCachedChoiceDistractors,
+  fetchCachedMindmapDerivedMcqs,
+} from '@/services/questionBankTestAiPrep'
 import { parseChoiceQuestionContent, validateChoiceQuestionJson } from '@/utils/choiceQuestion'
 import { htmlToPlainText } from '@/utils/htmlToText'
 import type {
@@ -31,8 +35,14 @@ import {
   markLearningTypeQbPerfectCleared,
 } from '@/services/learning-type-qb-perfect-cleared'
 import { loadWenWuUserScores, saveWenWuUserScores } from '@/views/learning/question-bank-score/wen-wu-user-scores'
+import { useBackgroundMusicStore } from '@/stores/background-music'
+import { startQbPerfectMidi, stopQbPerfectMidi } from '@/utils/qb-perfect-midi'
+import {
+  groupQuestionsByLearningType,
+} from '@/utils/questionBankTestCount'
+import { hashForAiCache, rememberAiResponse } from '@/utils/aiResponseCache'
 import { shuffleArray, scoreMcqSelection } from '@/utils/testMcqScore'
-import type { ResultRow, TestPhase, TestUnit } from '../components/questionBankTestTypes'
+import type { QuestionBankTestBuildConfig, ResultRow, TestPhase, TestUnit } from '../components/questionBankTestTypes'
 
 /** 切题时保存草稿或已提交题目的 UI 状态，便于返回该题时还原 */
 type UnitUiSnapshot =
@@ -68,7 +78,11 @@ export function useQuestionBankTest(
     learningTypeId?: number | null
     /** 是否从「测试全部」进入（仅此时才可能触发整库全对奖励） */
     testScopeAll?: boolean
+    /** 测验全对时播放音乐并弹窗（不写题库全对标签；与 testScopeAll 互斥使用） */
+    celebrateSessionPerfect?: boolean
     questions: QuestionBank[]
+    /** 学习题库测验构建配置（小项覆盖、题量；未设则构建全部候选） */
+    testBuildConfig?: QuestionBankTestBuildConfig
     /** 外部预置测试单元（如收藏页中的导图衍生小题） */
     presetUnits?: TestUnit[]
     loading: boolean
@@ -233,6 +247,29 @@ export function useQuestionBankTest(
     })
   }
 
+  function wrongBookReviewTargetKey(ltId: number, target: WrongQuestionTarget): string {
+    if (target.kind === 'question-bank') {
+      return `qb:${ltId}:${target.questionBankId}`
+    }
+    if (target.kind === 'mindmap-log') {
+      return `ml:${ltId}:${target.questionBankId}:${target.stem ?? ''}`
+    }
+    return `dm:${ltId}:${target.payload.parentQuestionBankId}:${target.payload.stem}:${target.payload.subIndex}:${target.payload.subTotal}`
+  }
+
+  /** 错题本测验中单题满分时，推进艾宾浩斯复习轮次（与打开详情「已复习」一致） */
+  async function maybeMarkWrongBookReviewedOnFullScore(unit: TestUnit) {
+    if (props.logMenuOrigin !== 'wrong-book') return
+    const ltId = Number(props.learningTypeId ?? 0)
+    if (!Number.isInteger(ltId) || ltId <= 0) return
+    const target = wrongTargetFromTestUnit(unit)
+    if (!target) return
+    const key = wrongBookReviewTargetKey(ltId, target)
+    if (wrongBookReviewedTargetKeys.value.has(key)) return
+    const ok = await markWrongQuestionReviewedByTarget({ learningTypeId: ltId, target })
+    if (ok) wrongBookReviewedTargetKeys.value.add(key)
+  }
+
   /** 满分时累计「连续场次」；满 3 场自动移出错题本 */
   async function maybeGraduateWrongBookOnFullScore(unit: TestUnit) {
     const ltId = Number(props.learningTypeId ?? 0)
@@ -254,12 +291,47 @@ export function useQuestionBankTest(
   const reportLogSavedForQuizSessionId = ref<string | null>(null)
   /** 避免 summary 阶段重复执行整库全对判定 */
   const perfectBankRewardCheckedForQuizSessionId = ref<string | null>(null)
+  /** 避免 summary 阶段重复执行会话全对庆祝 */
+  const sessionPerfectCelebrationCheckedForQuizSessionId = ref<string | null>(null)
+  /** 错题本测验：同一场次内已对某题标记过「已复习」，避免重复推进轮次 */
+  const wrongBookReviewedTargetKeys = ref(new Set<string>())
 
   watch(quizSessionId, () => {
     sessionArchiveLoggedForQuizSessionId.value = null
     reportLogSavedForQuizSessionId.value = null
     perfectBankRewardCheckedForQuizSessionId.value = null
+    sessionPerfectCelebrationCheckedForQuizSessionId.value = null
+    wrongBookReviewedTargetKeys.value = new Set()
   })
+
+  function isAllGradedPerfect(): boolean {
+    const graded = results.value.filter((r) => r.maxScore > 0)
+    if (graded.length === 0) return false
+    return graded.every((r) => {
+      const max = Math.round(r.maxScore * 100) / 100
+      const sc = Math.round(r.score * 100) / 100
+      return sc >= max
+    })
+  }
+
+  async function playPerfectCelebration(title: string, message: string) {
+    const bgm = useBackgroundMusicStore()
+    const resumeBgmAfterCelebration = bgm.isPlaying
+    if (resumeBgmAfterCelebration) {
+      await bgm.pausePlayback()
+    }
+    await startQbPerfectMidi()
+    try {
+      await ElMessageBox.alert(message, title, {
+        confirmButtonText: '好的',
+      })
+    } finally {
+      stopQbPerfectMidi()
+      if (resumeBgmAfterCelebration) {
+        await bgm.playCurrent()
+      }
+    }
+  }
 
   async function persistQuizSessionArchiveIfNeeded() {
     const sid = quizSessionId.value
@@ -409,13 +481,25 @@ export function useQuestionBankTest(
             `${r.unitIndex}. [${r.typeLabel}] ${r.title} | ${r.score}/${r.maxScore} | ${r.detail}`,
         )
         .join('\n')
-      const res = await requestQuizRadarAnalysis({
-        learningTypeName: props.learningTypeName,
-        totalScore: Math.round(totalScore.value * 100) / 100,
-        totalMax: Math.round(totalMax * 100) / 100,
-        resultLines,
-        timingAnalysisLines: buildTimingAnalysisLinesForRadar(),
-      })
+      const res = await rememberAiResponse(
+        `quiz-radar:${hashForAiCache(
+          [
+            props.learningTypeName,
+            String(totalScore.value),
+            String(totalMax),
+            resultLines,
+            buildTimingAnalysisLinesForRadar(),
+          ].join('\0'),
+        )}`,
+        () =>
+          requestQuizRadarAnalysis({
+            learningTypeName: props.learningTypeName,
+            totalScore: Math.round(totalScore.value * 100) / 100,
+            totalMax: Math.round(totalMax * 100) / 100,
+            resultLines,
+            timingAnalysisLines: buildTimingAnalysisLinesForRadar(),
+          }),
+      )
       radarDimensions.value = res.dimensions
       radarAnalysisMd.value = res.analysisMd
       await persistQuizSessionReportIfNeeded()
@@ -454,17 +538,10 @@ export function useQuestionBankTest(
     if (props.testScopeAll !== true) return
     const ltId = Number(props.learningTypeId ?? 0)
     if (!Number.isInteger(ltId) || ltId <= 0) return
-
-    const graded = results.value.filter((r) => r.maxScore > 0)
-    if (graded.length === 0) return
-    const allPerfect = graded.every((r) => {
-      const max = Math.round(r.maxScore * 100) / 100
-      const sc = Math.round(r.score * 100) / 100
-      return sc >= max
-    })
-    if (!allPerfect) return
+    if (!isAllGradedPerfect()) return
 
     perfectBankRewardCheckedForQuizSessionId.value = sid
+    sessionPerfectCelebrationCheckedForQuizSessionId.value = sid
 
     if (isLearningTypeQbPerfectCleared(ltId)) return
 
@@ -475,9 +552,20 @@ export function useQuestionBankTest(
     markLearningTypeQbPerfectCleared(ltId)
 
     const label = props.learningTypeName.trim() || '该'
-    await ElMessageBox.alert(`恭喜你，${label}题型题库全部答对！`, '题库全对', {
-      confirmButtonText: '好的',
-    })
+    await playPerfectCelebration('题库全对', `恭喜你，${label}题型题库全部答对！`)
+  }
+
+  async function applySessionPerfectCelebrationIfEligible() {
+    const sid = quizSessionId.value
+    if (!sid || phase.value !== 'summary') return
+    if (sessionPerfectCelebrationCheckedForQuizSessionId.value === sid) return
+    if (props.celebrateSessionPerfect !== true) return
+    if (perfectBankRewardCheckedForQuizSessionId.value === sid) return
+    if (!isAllGradedPerfect()) return
+
+    sessionPerfectCelebrationCheckedForQuizSessionId.value = sid
+    const label = props.learningTypeName.trim() || '本次'
+    await playPerfectCelebration('答题全对', `恭喜你，${label}测验全部答对！`)
   }
 
   watch(
@@ -486,6 +574,7 @@ export function useQuestionBankTest(
       if (p === 'summary') {
         void persistQuizSessionArchiveIfNeeded()
         void applyFullBankPerfectRewardIfEligible()
+        void applySessionPerfectCelebrationIfEligible()
       }
     },
   )
@@ -811,7 +900,106 @@ export function useQuestionBankTest(
     setCurrentIndex(idx)
   }
 
-  async function buildTestUnits(source: QuestionBank[]): Promise<TestUnit[]> {
+  async function fetchMindmapPrepared(q: QuestionBank): Promise<
+    Array<{
+      stem: string
+      options: string[]
+      correctIndices: number[]
+      mode: 'single' | 'multiple'
+    }>
+  > {
+    const mcqs = await fetchCachedMindmapDerivedMcqs(q)
+    const prepared: Array<{
+      stem: string
+      options: string[]
+      correctIndices: number[]
+      mode: 'single' | 'multiple'
+    }> = []
+    for (const m of mcqs) {
+      const options = shuffleArray([...m.correct, ...m.distractors])
+      if (options.length !== 5) continue
+      const norm = (s: string) => s.replace(/\s+/g, '')
+      const setC = new Set(m.correct.map(norm))
+      const correctIndices: number[] = []
+      options.forEach((opt, idx) => {
+        if (setC.has(norm(opt))) correctIndices.push(idx)
+      })
+      if (correctIndices.length !== m.correct.length) continue
+      prepared.push({ stem: m.stem, options, correctIndices, mode: m.mode })
+    }
+    if (prepared.length === 0) {
+      ElMessage.warning(`思维导图未生成有效小题：${q.title}`)
+    }
+    return prepared
+  }
+
+  async function appendMindmapUnits(q: QuestionBank, out: TestUnit[]): Promise<void> {
+    try {
+      const prepared = await fetchMindmapPrepared(q)
+      const subTotal = prepared.length
+      prepared.forEach((p, j) => {
+        out.push({
+          kind: 'mindmap-mcq',
+          parent: q,
+          stem: p.stem,
+          options: p.options,
+          correctIndices: p.correctIndices,
+          mode: p.mode,
+          subIndex: j + 1,
+          subTotal,
+        })
+      })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '请求失败'
+      ElMessage.error(`${msg}（${q.title}）`)
+    }
+  }
+
+  async function appendChoiceUnit(q: QuestionBank, out: TestUnit[]): Promise<void> {
+    const v = validateChoiceQuestionJson(q.content ?? '')
+    if (!v.ok) {
+      ElMessage.warning(`已跳过无效选择题：${q.title}`)
+      return
+    }
+    const payload = parseChoiceQuestionContent(q.content ?? '')
+    const correct = payload.correctAnswers.map((s) => s.trim()).filter(Boolean)
+    const need = 5 - correct.length
+    if (need < 0) {
+      ElMessage.warning(`已跳过（正确项多于 5 条）：${q.title}`)
+      return
+    }
+    try {
+      const distractors = await fetchCachedChoiceDistractors(q, correct, need)
+      const merged = [...correct, ...distractors.slice(0, need)]
+      const options = shuffleArray(merged)
+      while (options.length < 5) {
+        options.push('（选项占位）')
+      }
+      const finalOpts = options.slice(0, 5)
+      const norm = (s: string) => s.replace(/\s+/g, '')
+      const setC = new Set(correct.map(norm))
+      const correctIndices: number[] = []
+      finalOpts.forEach((opt, idx) => {
+        if (setC.has(norm(opt))) correctIndices.push(idx)
+      })
+      if (correctIndices.length !== correct.length) {
+        ElMessage.warning(`选择题选项对齐失败，已跳过：${q.title}`)
+        return
+      }
+      out.push({
+        kind: 'choice',
+        question: q,
+        options: finalOpts,
+        correctIndices,
+        mode: payload.mode,
+      })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '请求失败'
+      ElMessage.error(`${msg}（${q.title}）`)
+    }
+  }
+
+  async function buildTestUnitsLegacy(source: QuestionBank[]): Promise<TestUnit[]> {
     const shuffled = shuffleArray(source)
     const out: TestUnit[] = []
     let i = 0
@@ -819,89 +1007,117 @@ export function useQuestionBankTest(
       i++
       buildStatus.value = `正在准备第 ${i}/${shuffled.length} 道源题目…`
       const t = q.type ?? 'general'
-
       if (t === 'general') {
         out.push({ kind: 'general', question: q })
         continue
       }
-
       if (t === 'choice') {
-        const v = validateChoiceQuestionJson(q.content ?? '')
-        if (!v.ok) {
-          ElMessage.warning(`已跳过无效选择题：${q.title}`)
-          continue
-        }
-        const payload = parseChoiceQuestionContent(q.content ?? '')
-        const correct = payload.correctAnswers.map((s) => s.trim()).filter(Boolean)
-        const need = 5 - correct.length
-        if (need < 0) {
-          ElMessage.warning(`已跳过（正确项多于 5 条）：${q.title}`)
-          continue
-        }
-        try {
-          const distractors = await requestChoiceDistractors({
-            title: q.title,
-            correctAnswers: correct,
-            need,
-            analysisHtml: q.analysis,
-          })
-          const merged = [...correct, ...distractors.slice(0, need)]
-          const options = shuffleArray(merged)
-          while (options.length < 5) {
-            options.push('（选项占位）')
-          }
-          const finalOpts = options.slice(0, 5)
-          const norm = (s: string) => s.replace(/\s+/g, '')
-          const setC = new Set(correct.map(norm))
-          const correctIndices: number[] = []
-          finalOpts.forEach((opt, idx) => {
-            if (setC.has(norm(opt))) correctIndices.push(idx)
-          })
-          if (correctIndices.length !== correct.length) {
-            ElMessage.warning(`选择题选项对齐失败，已跳过：${q.title}`)
-            continue
-          }
-          out.push({
-            kind: 'choice',
-            question: q,
-            options: finalOpts,
-            correctIndices,
-            mode: payload.mode,
-          })
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : '请求失败'
-          ElMessage.error(`${msg}（${q.title}）`)
-        }
+        await appendChoiceUnit(q, out)
         continue
       }
-
       if (t === 'mindmap') {
-        try {
-          const mcqs = await requestMindmapDerivedMcqs({
-            title: q.title,
-            markdown: q.content ?? '',
-          })
-          type Prepared = {
-            stem: string
-            options: string[]
-            correctIndices: number[]
-            mode: 'single' | 'multiple'
+        await appendMindmapUnits(q, out)
+      }
+    }
+    return out
+  }
+
+  async function buildTestUnitsWithConfig(
+    source: QuestionBank[],
+    config: QuestionBankTestBuildConfig,
+  ): Promise<TestUnit[]> {
+    const limit = Math.max(0, Math.floor(config.questionCount))
+    if (limit === 0) return []
+
+  type MindmapPrepared = {
+      stem: string
+      options: string[]
+      correctIndices: number[]
+      mode: 'single' | 'multiple'
+    }
+
+    type LeafBuildState = {
+      leafId: number
+      sources: QuestionBank[]
+      sourceIndex: number
+      mindmapPrepared: Map<number, MindmapPrepared[]>
+      mindmapNextIndex: Map<number, number>
+    }
+
+    const out: TestUnit[] = []
+    const byLeaf = groupQuestionsByLearningType(source, config.learningTypeIds)
+
+    const leafStates: LeafBuildState[] = config.learningTypeIds
+      .map((leafId) => {
+        const items = (byLeaf.get(leafId) ?? []).filter((q) => {
+          const t = q.type ?? 'general'
+          if (t === 'general') return config.includeGeneral
+          if (t === 'choice' || t === 'mindmap') return config.includeChoiceLike
+          return false
+        })
+        return {
+          leafId,
+          sources: shuffleArray(items),
+          sourceIndex: 0,
+          mindmapPrepared: new Map<number, MindmapPrepared[]>(),
+          mindmapNextIndex: new Map<number, number>(),
+        }
+      })
+      .filter((s) => s.sources.length > 0)
+
+    const leafHasPending = (state: LeafBuildState): boolean => {
+      for (let i = state.sourceIndex; i < state.sources.length; i++) {
+        const q = state.sources[i]!
+        const t = q.type ?? 'general'
+        if (t === 'choice' || t === 'general') return true
+        if (t === 'mindmap' && q.id != null) {
+          const prepared = state.mindmapPrepared.get(q.id)
+          if (!prepared) return true
+          if ((state.mindmapNextIndex.get(q.id) ?? 0) < prepared.length) return true
+        }
+      }
+      return false
+    }
+
+    const appendOneUnitFromLeaf = async (state: LeafBuildState): Promise<boolean> => {
+      if (out.length >= limit) return false
+      while (state.sourceIndex < state.sources.length) {
+        const q = state.sources[state.sourceIndex]!
+        const t = q.type ?? 'general'
+
+        if (t === 'general') {
+          state.sourceIndex++
+          out.push({ kind: 'general', question: q })
+          return true
+        }
+
+        if (t === 'choice') {
+          state.sourceIndex++
+          const before = out.length
+          await appendChoiceUnit(q, out)
+          return out.length > before
+        }
+
+        if (t === 'mindmap' && q.id != null) {
+          if (!state.mindmapPrepared.has(q.id)) {
+            buildStatus.value = `正在从「${q.title}」思维导图生成测验题…`
+            try {
+              state.mindmapPrepared.set(q.id, await fetchMindmapPrepared(q))
+              state.mindmapNextIndex.set(q.id, 0)
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : '请求失败'
+              ElMessage.error(`${msg}（${q.title}）`)
+              state.mindmapPrepared.set(q.id, [])
+              state.mindmapNextIndex.set(q.id, 0)
+            }
           }
-          const prepared: Prepared[] = []
-          for (const m of mcqs) {
-            const options = shuffleArray([...m.correct, ...m.distractors])
-            if (options.length !== 5) continue
-            const norm = (s: string) => s.replace(/\s+/g, '')
-            const setC = new Set(m.correct.map(norm))
-            const correctIndices: number[] = []
-            options.forEach((opt, idx) => {
-              if (setC.has(norm(opt))) correctIndices.push(idx)
-            })
-            if (correctIndices.length !== m.correct.length) continue
-            prepared.push({ stem: m.stem, options, correctIndices, mode: m.mode })
-          }
-          const subTotal = prepared.length
-          prepared.forEach((p, j) => {
+          const prepared = state.mindmapPrepared.get(q.id) ?? []
+          const idx = state.mindmapNextIndex.get(q.id) ?? 0
+          if (idx < prepared.length) {
+            const p = prepared[idx]!
+            state.mindmapNextIndex.set(q.id, idx + 1)
+            if (idx + 1 >= prepared.length) state.sourceIndex++
+            const subTotal = prepared.length
             out.push({
               kind: 'mindmap-mcq',
               parent: q,
@@ -909,20 +1125,42 @@ export function useQuestionBankTest(
               options: p.options,
               correctIndices: p.correctIndices,
               mode: p.mode,
-              subIndex: j + 1,
+              subIndex: idx + 1,
               subTotal,
             })
-          })
-          if (subTotal === 0) {
-            ElMessage.warning(`思维导图未生成有效小题：${q.title}`)
+            return true
           }
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : '请求失败'
-          ElMessage.error(`${msg}（${q.title}）`)
+          state.sourceIndex++
+          continue
         }
+
+        state.sourceIndex++
       }
+      return false
     }
+
+    for (const state of leafStates) {
+      if (out.length >= limit) break
+      await appendOneUnitFromLeaf(state)
+    }
+
+    let round = 0
+    while (out.length < limit && leafStates.some((s) => leafHasPending(s))) {
+      const state = leafStates[round % leafStates.length]!
+      await appendOneUnitFromLeaf(state)
+      round++
+      if (round > limit * leafStates.length * 8) break
+    }
+
     return out
+  }
+
+  async function buildTestUnits(
+    source: QuestionBank[],
+    config?: QuestionBankTestBuildConfig,
+  ): Promise<TestUnit[]> {
+    if (!config) return buildTestUnitsLegacy(source)
+    return buildTestUnitsWithConfig(source, config)
   }
 
   let buildSeq = 0
@@ -932,6 +1170,10 @@ export function useQuestionBankTest(
         props.loading,
         props.questions.map((q) => q.id).join(','),
         props.questions.length,
+        props.testBuildConfig?.learningTypeIds.join(','),
+        props.testBuildConfig?.questionCount,
+        props.testBuildConfig?.includeChoiceLike,
+        props.testBuildConfig?.includeGeneral,
         (props.presetUnits ?? []).length,
       ] as const,
     async ([loading]) => {
@@ -947,7 +1189,7 @@ export function useQuestionBankTest(
       phase.value = 'building'
       buildStatus.value = '正在打乱题目并生成测验…'
       try {
-        const built = await buildTestUnits(props.questions)
+        const built = await buildTestUnits(props.questions, props.testBuildConfig)
         if (seq !== buildSeq) return
         const merged = shuffleArray([...built, ...preset])
         if (merged.length === 0) {
@@ -1017,6 +1259,7 @@ export function useQuestionBankTest(
       quizSessionId: quizSessionId.value,
     })
     if (s >= maxS) {
+      await maybeMarkWrongBookReviewedOnFullScore(u)
       await maybeGraduateWrongBookOnFullScore(u)
     }
 
@@ -1060,11 +1303,15 @@ export function useQuestionBankTest(
     try {
       const title = unitTitle(u)
       const stem = u.kind === 'mindmap-mcq' ? u.stem : undefined
-      assistMd.value = await requestChoiceTestAssist({
-        title,
-        stem,
-        options: u.options,
-      })
+      assistMd.value = await rememberAiResponse(
+        `mcq-assist:${hashForAiCache([title, stem ?? '', ...u.options].join('\0'))}`,
+        () =>
+          requestChoiceTestAssist({
+            title,
+            stem,
+            options: u.options,
+          }),
+      )
     } catch (e) {
       assistError.value = e instanceof Error ? e.message : '请求失败'
       ElMessage.error(assistError.value)
@@ -1123,6 +1370,7 @@ export function useQuestionBankTest(
       quizSessionId: quizSessionId.value,
     })
     if (gainedRounded >= maxS) {
+      await maybeMarkWrongBookReviewedOnFullScore(u)
       await maybeGraduateWrongBookOnFullScore(u)
     }
 

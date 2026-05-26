@@ -12,6 +12,7 @@ import type {
   WrongQuestion,
   WrongQuestionBackfillLog,
   WrongQuestionTrash,
+  QuestionBankAiPrep,
 } from './models'
 
 export class LearningAppDatabase extends Dexie {
@@ -27,6 +28,7 @@ export class LearningAppDatabase extends Dexie {
   dailyWebUsage!: Table<DailyWebUsage, number>
   workTimeLogs!: Table<WorkTimeLog, number>
   exerciseTimeLogs!: Table<ExerciseTimeLog, number>
+  questionBankAiPrep!: Table<QuestionBankAiPrep, number>
 
   constructor() {
     super('LearningAppDatabase')
@@ -183,6 +185,25 @@ export class LearningAppDatabase extends Dexie {
       dailyWebUsage: '++id, &dateKey, updatedAt',
       workTimeLogs: '++id, dateKey, kind, createdAt',
       exerciseTimeLogs: '++id, dateKey, kind, createdAt',
+    })
+
+    this.version(12).stores({
+      learningTypes: '++id, parentId, name, createdAt, updatedAt',
+      questionBanks:
+        '++id, type, title, learningTypeId, score, createdAt, updatedAt',
+      favoriteQuestions: '++id, questionBankId, learningTypeId, createdAt',
+      questionScores: '++id, questionBankId, userName, createdAt',
+      scoreRankings: '++id, userName, totalScore, rank, updatedAt',
+      answerLogs: '++id, questionBankId, userName, quizSessionId, createdAt',
+      wrongQuestions:
+        '++id, learningTypeId, questionBankId, questionType, nextReviewAt, updatedAt, lastWrongAt',
+      wrongQuestionBackfillLogs: '++id, &answerLogId, processedAt',
+      wrongQuestionTrash: '++id, originalWrongQuestionId, deletedAt',
+      dailyWebUsage: '++id, &dateKey, updatedAt',
+      workTimeLogs: '++id, dateKey, kind, createdAt',
+      exerciseTimeLogs: '++id, dateKey, kind, createdAt',
+      questionBankAiPrep:
+        '++id, &[questionBankId+kind], questionBankId, kind, fingerprint, updatedAt',
     })
   }
 }

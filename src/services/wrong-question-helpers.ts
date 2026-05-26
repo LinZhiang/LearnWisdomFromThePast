@@ -374,3 +374,16 @@ export async function markWrongQuestionReviewed(row: WrongQuestion, reviewAtIso?
   })
 }
 
+/** 按测验单元定位错题本记录并推进复习轮次（与打开详情时「已复习」一致） */
+export async function markWrongQuestionReviewedByTarget(input: {
+  learningTypeId: number
+  target: WrongQuestionTarget
+}): Promise<boolean> {
+  if (!Number.isInteger(input.learningTypeId) || input.learningTypeId <= 0) return false
+  const rows = await listWrongByLearningType(input.learningTypeId)
+  const hit = rows.find((r) => targetsMatchRecord(input.target, r))
+  if (!hit?.id) return false
+  await markWrongQuestionReviewed(hit)
+  return true
+}
+

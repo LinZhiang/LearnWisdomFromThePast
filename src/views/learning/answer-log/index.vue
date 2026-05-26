@@ -572,13 +572,25 @@ const entryQuestionDisplayTitle = (entry: QuestionBankTestSessionEntry) => {
   position: sticky;
   top: 0;
   z-index: 2;
-  background: var(--app-surface-alt);
+  background: color-mix(
+    in srgb,
+    var(--app-text-muted, #64748b) 6%,
+    var(--app-surface, #fff)
+  );
   font-weight: 600;
   box-shadow: 0 1px 0 var(--app-border-soft);
 }
 
 .detail-summary-row {
   border-top: 1px solid var(--app-border-soft);
+}
+
+.detail-summary-row:nth-child(even) {
+  background: color-mix(
+    in srgb,
+    var(--app-text-muted, #64748b) 4%,
+    var(--app-surface, #fff)
+  );
 }
 
 .cell-title,
@@ -672,5 +684,43 @@ const entryQuestionDisplayTitle = (entry: QuestionBankTestSessionEntry) => {
     flex-direction: column;
     gap: 4px;
   }
+}
+</style>
+
+<style>
+/* el-table 内部节点需非 scoped，与分数排名页斑纹风格一致 */
+.session-el-table.el-table {
+  --el-table-bg-color: var(--app-surface, #fff);
+  --el-table-tr-bg-color: var(--app-surface, #fff);
+  --el-table-header-bg-color: color-mix(
+    in srgb,
+    var(--app-text-muted, #64748b) 6%,
+    var(--app-surface, #fff)
+  );
+  --el-table-row-hover-bg-color: color-mix(
+    in srgb,
+    var(--app-text-muted, #64748b) 7%,
+    var(--app-surface, #fff)
+  );
+  --el-table-border-color: var(--app-border-soft, #e2e8f0);
+}
+
+.session-el-table.el-table--striped
+  .el-table__body
+  tr.el-table__row--striped
+  > td.el-table__cell {
+  background-color: color-mix(
+    in srgb,
+    var(--app-text-muted, #64748b) 4%,
+    var(--app-surface, #fff)
+  ) !important;
+}
+
+.session-el-table .el-table__body tr:hover > td.el-table__cell {
+  background-color: color-mix(
+    in srgb,
+    var(--app-text-muted, #64748b) 7%,
+    var(--app-surface, #fff)
+  ) !important;
 }
 </style>

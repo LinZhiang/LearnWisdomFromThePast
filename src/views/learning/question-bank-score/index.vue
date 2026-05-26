@@ -17,7 +17,7 @@ const {
   dailyHistory,
   workHistory,
   workDateKey,
-  workMinutes,
+  workHours,
   workKind,
   workNote,
   submittingWork,
@@ -28,7 +28,7 @@ const {
 const {
   exerciseHistory,
   exerciseDateKey,
-  exerciseMinutes,
+  exerciseHours,
   exerciseKind,
   exerciseNote,
   submittingExercise,
@@ -59,12 +59,12 @@ const goWenWuRank = () => {
 
       <WorkTimeSubmitSection
         :work-date-key="workDateKey"
-        :work-minutes="workMinutes"
+        :work-hours="workHours"
         :work-kind="workKind"
         :work-note="workNote"
         :submitting="submittingWork"
         @update:work-date-key="workDateKey = $event"
-        @update:work-minutes="workMinutes = $event"
+        @update:work-hours="workHours = $event"
         @update:work-kind="workKind = $event"
         @update:work-note="workNote = $event"
         @submit="submitWork"
@@ -74,12 +74,12 @@ const goWenWuRank = () => {
 
       <ExerciseTimeSubmitSection
         :exercise-date-key="exerciseDateKey"
-        :exercise-minutes="exerciseMinutes"
+        :exercise-hours="exerciseHours"
         :exercise-kind="exerciseKind"
         :exercise-note="exerciseNote"
         :submitting="submittingExercise"
         @update:exercise-date-key="exerciseDateKey = $event"
-        @update:exercise-minutes="exerciseMinutes = $event"
+        @update:exercise-hours="exerciseHours = $event"
         @update:exercise-kind="exerciseKind = $event"
         @update:exercise-note="exerciseNote = $event"
         @submit="submitExercise"
