@@ -1,78 +1,118 @@
-# Cloudflare 部署配置说明（温故智学网）
+# Cloudflare 部署（温故智学网）
 
-部署成功后，**请用这个地址访问**（国内一般可直连，无需 VPN）：
+## 为什么地址还是 `learn-wisdom-from-the-past....workers.dev`？
 
-**https://wengu-zhixue.pages.dev**
+1. **控制台里现在是 Workers 项目**，不是 Pages → 域名只能是 `*.workers.dev`（国内常连不上）。
+2. **改仓库配置不会自动改 Cloudflare 项目类型**；必须在控制台新建 **Pages**，或改用下方 GitHub Actions。
+3. 本地曾有 2 个 commit 未 push，Cloudflare 一直在用旧配置构建。
 
-旧的 `learn-wisdom-from-the-past.xxxxx.workers.dev` 是 Workers 域名，可不再使用。
+**目标地址（国内一般可直连）：**
 
----
+### https://wengu-zhixue.pages.dev
 
-## 一、在 Cloudflare 控制台怎么配（复制粘贴即可）
-
-路径：**Workers & Pages** → **Create** → **Pages** → **Connect to Git**  
-（若已有 Git 连接的项目，进 **Settings → Builds** 改下面几项。）
-
-| 配置项 | 填什么 |
-|--------|--------|
-| **Project name** | `wengu-zhixue` |
-| **Production branch** | `main` |
-| **Root directory** | `/`（留空或填 `/`） |
-| **Build command** | `npm run build` |
-| **Build output directory** | `dist` |
-| **Deploy command** | `npx wrangler pages deploy` |
-
-> **不要**再填 `npx wrangler deploy`（那是 Workers，会得到 `workers.dev` 且国内常需 VPN）。
-
-### 环境变量（Settings → Environment variables → Production）
-
-| 变量名 | 值 | 说明 |
-|--------|-----|------|
-| `NODE_VERSION` | `22` | Wrangler 4 需要 Node 22+ |
-| `VITE_AI_API_BASE` | 例：`https://你的API域名/v1` | 可选；不配则 AI 功能不可用，其余功能正常 |
-
-保存后点 **Retry deployment** 或 push 代码到 `main` 自动构建。
+（若你以前用过 `learning-app-ad8.pages.dev`，也可以把 `wrangler.toml` 里的 `name` 改回 `learning-app-ad8`。）
 
 ---
 
-## 二、仓库里已帮你配好的文件
+## 方案 A：Cloudflare 控制台（推荐，一次配好）
+
+### 第 1 步：新建 Pages（不要改原来的 Workers）
+
+1. 打开 https://dash.cloudflare.com → **Workers & Pages**
+2. 点 **Create** → 选 **Pages**（不要选 Workers）
+3. **Connect to Git** → 选 GitHub → 仓库 `LearnWisdomFromThePast`
+
+### 第 2 步：构建配置（逐项复制）
+
+| 配置项 | 填写内容 |
+|--------|----------|
+| Project name | `wengu-zhixue` |
+| Production branch | `main` |
+| Framework preset | None |
+| Build command | `npm run build` |
+| Build output directory | `dist` |
+| **Deploy command** | **留空**（Pages 不需要 deploy 命令） |
+
+若界面**必须**填 Deploy command，才填：`npx wrangler pages deploy`
+
+**千万不要填** `npx wrangler deploy`（这就是你现在 workers.dev 的原因）。
+
+### 第 3 步：环境变量
+
+**Settings → Environment variables → Production**：
+
+| 变量 | 值 |
+|------|-----|
+| `NODE_VERSION` | `22` |
+
+（可选）`VITE_AI_API_BASE` = 你的 AI 代理地址，以 `/v1` 结尾。
+
+### 第 4 步：保存并部署
+
+点 **Save and Deploy**。成功后访问：**https://wengu-zhixue.pages.dev**
+
+### 第 5 步：关掉旧 Workers（避免混淆）
+
+1. 打开项目 **learn-wisdom-from-the-past**（Workers 那个）
+2. **Settings** → **Git integration** → **Disconnect**（断开 Git 自动构建）
+3. 可选：**Delete project** 删除整个 Workers 项目
+
+---
+
+## 方案 B：GitHub Actions 自动发布到 Pages
+
+适合不想折腾 Cloudflare 构建界面时使用。
+
+### 1. 获取 Cloudflare API Token
+
+1. Cloudflare → 右上角头像 → **My Profile** → **API Tokens**
+2. **Create Token** → 模板 **Edit Cloudflare Workers**
+3. 权限至少包含：**Account → Cloudflare Pages → Edit**
+4. 复制生成的 Token
+
+### 2. 获取 Account ID
+
+Workers & Pages 首页右侧 **Account ID**，复制。
+
+### 3. 在 GitHub 仓库加 Secrets
+
+仓库 **Settings → Secrets and variables → Actions → New repository secret**：
+
+| Secret 名称 | 内容 |
+|-------------|------|
+| `CLOUDFLARE_API_TOKEN` | 上一步的 Token |
+| `CLOUDFLARE_ACCOUNT_ID` | Account ID |
+| `VITE_AI_API_BASE` | （可选）AI 代理地址 |
+
+### 4. Push 代码到 main
+
+推送后 Actions 会自动跑 `.github/workflows/cloudflare-pages.yml`，部署到 **wengu-zhixue.pages.dev**。
+
+同样建议 **断开** 旧 Workers 项目的 Git 连接，避免重复构建。
+
+---
+
+## 仓库内已配置的文件
 
 | 文件 | 作用 |
 |------|------|
-| `wrangler.toml` | 项目名 `wengu-zhixue`，输出目录 `dist` |
-| `.node-version` | Node 22 |
-| `.npmrc` | 官方 npm 源 + 解决依赖冲突 |
-| `public/_redirects` | Vue 路由刷新不 404（`/* → index.html`） |
+| `wrangler.toml` | Pages 项目名 `wengu-zhixue` |
+| `public/_redirects` | SPA 路由刷新 |
+| `.npmrc` / `.node-version` | 依赖安装与 Node 22 |
+| `.github/workflows/cloudflare-pages.yml` | Actions 自动部署 |
 
 ---
 
-## 三、本地手动部署（可选）
+## 对照：Workers vs Pages
 
-```bash
-npm run build
-npm run deploy
-```
-
-等价于 `wrangler pages deploy`（会读 `wrangler.toml`）。
-
----
-
-## 四、常见问题
-
-**Q：构建卡在 Installing？**  
-A：确保仓库里有 `.npmrc`，且已 push 最新 `package-lock.json`。
-
-**Q：Deploy 报 Node 版本不够？**  
-A：在 Cloudflare 环境变量加 `NODE_VERSION=22`。
-
-**Q：页面能开但 AI 不能用？**  
-A：在 Cloudflare 构建环境变量配置 `VITE_AI_API_BASE`（必须以 `/v1` 结尾），然后重新部署。详见 `docs/ENV-说明.md`。
-
-**Q：还想用自定义域名？**  
-A：Pages 项目 → **Custom domains** → 添加你的域名（域名 DNS 需在 Cloudflare）。
+| | Workers（你现在） | Pages（应改成） |
+|---|------------------|----------------|
+| 域名 | `xxx.1806154588.workers.dev` | `wengu-zhixue.pages.dev` |
+| 国内访问 | 常需 VPN | 一般可直连 |
+| Deploy 命令 | `npx wrangler deploy` | 留空或 `npx wrangler pages deploy` |
 
 ---
 
-## 五、删除或停用旧 Workers 项目（可选）
+## 自定义域名（可选）
 
-若仍存在 **learn-wisdom-from-the-past** 的 Workers 项目，可在控制台 **Settings → Delete project**，避免和 Pages 混淆。
+Pages 项目 → **Custom domains** → 添加你的域名（域名需在 Cloudflare 解析）。
