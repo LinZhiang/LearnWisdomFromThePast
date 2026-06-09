@@ -44,18 +44,18 @@ export const MENTAL_MATH_ARITHMETIC_MODES: MentalMathModeConfig[] = [
     correctDelta: 8,
     wrongDelta: -16,
     maxScore: 100,
-    desc: '30 秒 · 个位或十位加减乘除（含负数）· 4 选项 · 对 +8 / 错 -16 · 对 +1 秒 / 错 -1 秒',
+    desc: '30 秒 · 十位数加减乘除（含负数）· 4 选项 · 对 +8 / 错 -16 · 对 +1 秒 / 错 -1 秒',
   },
   {
     id: 'hard',
     category: 'arithmetic',
     label: '高难模式',
     durationSec: 40,
-    optionCount: 4,
+    optionCount: 5,
     correctDelta: 14,
     wrongDelta: -28,
     maxScore: 100,
-    desc: '40 秒 · 十位或百位加减乘除（含负数）· 4 选项 · 对 +14 / 错 -28 · 对 +1 秒 / 错 -1 秒',
+    desc: '40 秒 · 十位或百位加减乘除（含负数）· 5 选项 · 对 +14 / 错 -28 · 对 +1 秒 / 错 -1 秒',
   },
 ]
 
@@ -80,7 +80,7 @@ export const MENTAL_MATH_POWER_MODES: MentalMathModeConfig[] = [
     correctDelta: 8,
     wrongDelta: -16,
     maxScore: 100,
-    desc: '35 秒 · 2ⁿ（含 2⁻¹～2⁻⁵ 与 2⁰～2¹⁶）· 4 选项 · 对 +8 / 错 -16 · 对 +1 秒 / 错 -1 秒',
+    desc: '35 秒 · 2ⁿ（含 2⁻⁷～2²⁴）· 4 选项 · 对 +8 / 错 -16 · 对 +1 秒 / 错 -1 秒',
   },
 ]
 
@@ -124,12 +124,10 @@ function pickEasyOperand(): number {
   return randInt(-9, 9)
 }
 
-/** 普通：个位或十位 */
+/** 普通：十位数（绝对值 10～99，不含个位数） */
 function pickNormalOperand(): number {
-  if (Math.random() < 0.5) {
-    return randInt(-9, 9)
-  }
-  return randInt(-99, 99)
+  const sign = Math.random() < 0.5 ? -1 : 1
+  return sign * randInt(10, 99)
 }
 
 /** 高难：十位或百位（绝对值至少 10） */
@@ -151,10 +149,15 @@ function pickOperands(mode: MentalMathMode): [number, number] {
   return [pickHardOperand(), pickHardOperand()]
 }
 
+type ArithmeticOp = '+' | '-' | '*' | '/'
+
 type BuiltQuestion = {
   expression: string
   answer: number
   hasNegativeInCalculation: boolean
+  op: ArithmeticOp
+  /** 除法题中的除数（用于生成同余选项） */
+  divisor?: number
 }
 
 function hasNegativeInValues(...values: number[]): boolean {
@@ -167,6 +170,7 @@ function buildAdd(a: number, b: number): BuiltQuestion {
     expression: `${a} + ${b} = ?`,
     answer,
     hasNegativeInCalculation: hasNegativeInValues(a, b, answer),
+    op: '+',
   }
 }
 
@@ -176,6 +180,7 @@ function buildSub(a: number, b: number): BuiltQuestion {
     expression: `${a} − ${b} = ?`,
     answer,
     hasNegativeInCalculation: hasNegativeInValues(a, b, answer),
+    op: '-',
   }
 }
 
@@ -185,6 +190,7 @@ function buildMul(a: number, b: number): BuiltQuestion {
     expression: `${a} × ${b} = ?`,
     answer,
     hasNegativeInCalculation: hasNegativeInValues(a, b, answer),
+    op: '*',
   }
 }
 
@@ -197,16 +203,18 @@ function buildDiv(mode: MentalMathMode): BuiltQuestion | null {
       divisor = pickNonZero(-9, 9)
       quotient = pickNonZero(-9, 9)
     } else if (mode === 'normal') {
-      divisor = pickNonZero(-99, 99)
-      quotient = pickNonZero(-99, 99)
+      divisor = pickNormalOperand()
+      quotient = pickNormalOperand()
     } else {
       divisor = pickNonZero(-99, 99)
-      quotient = pickNonZero(-99, 99)
+      const k = pickNonZero(-12, 12)
+      quotient = divisor * k
     }
     dividend = divisor * quotient
     if (mode === 'easy' && Math.abs(dividend) > 99) continue
     if (mode === 'normal' && Math.abs(dividend) > 9999) continue
     if (mode === 'hard' && Math.abs(dividend) > 999999) continue
+    if (mode === 'hard' && quotient % divisor !== 0) continue
     break
   }
   if (divisor === 0) return null
@@ -214,6 +222,8 @@ function buildDiv(mode: MentalMathMode): BuiltQuestion | null {
     expression: `${dividend} ÷ ${divisor} = ?`,
     answer: quotient,
     hasNegativeInCalculation: hasNegativeInValues(dividend, divisor, quotient),
+    op: '/',
+    divisor,
   }
 }
 
@@ -268,6 +278,49 @@ function distinctWrongAnswers(
     for (const sign of [-1, 1]) {
       const candidate = correct + sign * delta
       if (used.has(candidate)) continue
+      used.add(candidate)
+      wrong.push(candidate)
+      if (wrong.length >= count) break
+    }
+  }
+
+  return wrong
+}
+
+/** 个位数（与口算习惯一致，负数取绝对值个位） */
+function onesDigit(n: number): number {
+  return Math.abs(n) % 10
+}
+
+/** 高难加减乘：干扰项与正确答案个位数相同 */
+function distinctWrongAnswersSameOnesDigit(correct: number, count: number): number[] {
+  const target = onesDigit(correct)
+  const wrong: number[] = []
+  const used = new Set<number>([correct])
+
+  for (let step = 10; wrong.length < count && step <= 900; step += 10) {
+    for (const sign of [-1, 1]) {
+      const candidate = correct + sign * step
+      if (used.has(candidate) || onesDigit(candidate) !== target) continue
+      used.add(candidate)
+      wrong.push(candidate)
+      if (wrong.length >= count) break
+    }
+  }
+
+  return wrong
+}
+
+/** 高难除法：干扰项与正确答案均为除数的整数倍（除以除数余 0） */
+function distinctWrongDivQuotients(quotient: number, divisor: number, count: number): number[] {
+  if (divisor === 0) return []
+  const wrong: number[] = []
+  const used = new Set<number>([quotient])
+
+  for (let mult = 1; wrong.length < count && mult <= 40; mult++) {
+    for (const sign of [-1, 1]) {
+      const candidate = quotient + sign * mult * divisor
+      if (used.has(candidate) || candidate % divisor !== 0) continue
       used.add(candidate)
       wrong.push(candidate)
       if (wrong.length >= count) break
@@ -344,8 +397,8 @@ function generatePowerOfTwoQuestion(
   id: number,
   optionCount: number,
 ): MentalMathQuestion {
-  const minExp = mode === 'power-easy' ? -3 : -5
-  const maxExp = mode === 'power-easy' ? 12 : 16
+  const minExp = mode === 'power-easy' ? -3 : -7
+  const maxExp = mode === 'power-easy' ? 12 : 24
   const maxNeighbor = mode === 'power-easy' ? 2 : 3
   const exponent = randInt(minExp, maxExp)
   const correctAnswer = 2 ** exponent
@@ -386,11 +439,16 @@ export function generateMentalMathQuestion(
   }
 
   const built = buildRandomQuestion(mode)
-  const wrong = distinctWrongAnswers(
-    built.answer,
-    optionCount - 1,
-    built.hasNegativeInCalculation,
-  )
+  const wrong =
+    mode === 'hard' && built.op === '/'
+      ? distinctWrongDivQuotients(built.answer, built.divisor ?? 1, optionCount - 1)
+      : mode === 'hard'
+        ? distinctWrongAnswersSameOnesDigit(built.answer, optionCount - 1)
+        : distinctWrongAnswers(
+            built.answer,
+            optionCount - 1,
+            built.hasNegativeInCalculation,
+          )
   const options = [...wrong, built.answer]
   for (let i = options.length - 1; i > 0; i--) {
     const j = randInt(0, i)

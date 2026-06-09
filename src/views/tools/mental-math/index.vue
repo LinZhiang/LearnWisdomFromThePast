@@ -244,7 +244,7 @@ onBeforeUnmount(() => {
       <section class="mode-section">
         <h3 class="mode-section__title">2 的 n 次幂</h3>
         <p class="mode-section__hint">
-          题目形如 2ⁿ（简单含 2⁻¹～2⁻³，复杂含 2⁻¹～2⁻⁵），选项均为 2 的次幂，干扰项为相邻次幂。
+          题目形如 2ⁿ（简单含 2⁻¹～2⁻³ 与 2⁰～2¹²，复杂含 2⁻⁷～2²⁴），选项均为 2 的次幂，干扰项为相邻次幂。
         </p>
         <div class="mode-grid">
           <button
