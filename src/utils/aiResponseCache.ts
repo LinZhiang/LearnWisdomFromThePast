@@ -86,9 +86,13 @@ function writeEntry(key: string, value: unknown) {
 /**
  * 本地缓存 AI 响应：相同 key 不重复请求；并发同 key 合并为一次请求。
  */
+function isStaleEmptyCacheValue(value: unknown): boolean {
+  return Array.isArray(value) && value.length === 0
+}
+
 export async function rememberAiResponse<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
   const cached = readEntry(key)
-  if (cached) return cached.v as T
+  if (cached && !isStaleEmptyCacheValue(cached.v)) return cached.v as T
 
   const pending = inflight.get(key)
   if (pending) return pending as Promise<T>
@@ -96,6 +100,39 @@ export async function rememberAiResponse<T>(key: string, fetcher: () => Promise<
   const task = (async () => {
     try {
       const value = await fetcher()
+      if (!isStaleEmptyCacheValue(value)) writeEntry(key, value)
+      return value
+    } finally {
+      inflight.delete(key)
+    }
+  })()
+
+  inflight.set(key, task)
+  return task
+}
+
+/**
+ * 批量 AI 题缓存：条数不足目标时视为未命中并重新请求，避免「只缓存了 5 道」长期命中。
+ */
+export async function rememberAiArrayResponse<T>(
+  key: string,
+  minLength: number,
+  fetcher: () => Promise<T[]>,
+): Promise<T[]> {
+  const cached = readEntry(key)
+  if (cached && Array.isArray(cached.v) && cached.v.length >= minLength) {
+    return cached.v as T[]
+  }
+
+  const pending = inflight.get(key)
+  if (pending) return pending as Promise<T[]>
+
+  const task = (async () => {
+    try {
+      const value = await fetcher()
+      if (!Array.isArray(value) || value.length < minLength) {
+        throw new Error(`题量不足（${Array.isArray(value) ? value.length : 0}/${minLength}）`)
+      }
       writeEntry(key, value)
       return value
     } finally {
@@ -108,7 +145,18 @@ export async function rememberAiResponse<T>(key: string, fetcher: () => Promise<
 }
 
 export function buildQuestionBankAiCacheKey(
-  kind: 'choice-distractors' | 'mindmap-mcqs',
+  kind:
+    | 'choice-distractors'
+    | 'mindmap-mcqs'
+    | 'mindmap-mcqs-quiz'
+    | 'handout-mcqs'
+    | 'handout-mcqs-quiz'
+    | 'handout-mcqs-quiz-v3'
+    | 'handout-general'
+    | 'handout-general-quiz'
+    | 'handout-general-quiz-v3'
+    | 'handout-judgment-quiz'
+    | 'handout-judgment-quiz-v3',
   questionId: number | undefined,
   fingerprint: string,
 ): string {

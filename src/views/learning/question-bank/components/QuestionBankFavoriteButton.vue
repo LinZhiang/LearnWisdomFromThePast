@@ -77,6 +77,6 @@ defineExpose({ refresh })
     :icon="favorited ? StarFilled : Star"
     @click="onClick"
   >
-    {{ favorited ? '已收藏' : '收藏题目' }}
+    {{ favorited ? '已收藏' : '收藏' }}
   </el-button>
 </template>

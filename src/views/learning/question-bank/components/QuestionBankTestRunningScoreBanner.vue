@@ -2,17 +2,30 @@
 defineProps<{
   totalScoreRounded: number
   runningTotalMax: number
+  wrongBookMode?: boolean
+  wrongBookCorrectCount?: number
+  unitsLength?: number
 }>()
 </script>
 
 <template>
   <div class="test-running-score-banner" role="status" aria-live="polite">
-    <span class="test-running-score-main">
-      做题累计得分：
-      <strong>{{ totalScoreRounded }}</strong>
-      分
-    </span>
-    <span class="test-running-score-sub">全卷满分 {{ runningTotalMax }} 分</span>
+    <template v-if="wrongBookMode">
+      <span class="test-running-score-main">
+        已累计答对：
+        <strong>{{ wrongBookCorrectCount ?? 0 }}</strong>
+        / {{ unitsLength ?? 0 }} 题
+      </span>
+      <span class="test-running-score-sub">作答题提交后请自评对错；选择题自动判分</span>
+    </template>
+    <template v-else>
+      <span class="test-running-score-main">
+        做题累计得分：
+        <strong>{{ totalScoreRounded }}</strong>
+        分
+      </span>
+      <span class="test-running-score-sub">全卷满分 {{ runningTotalMax }} 分</span>
+    </template>
   </div>
 </template>
 

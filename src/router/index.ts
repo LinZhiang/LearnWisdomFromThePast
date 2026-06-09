@@ -1,16 +1,4 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import AnswerLogView from '@/views/learning/answer-log/index.vue'
-import LearningTypeEditView from '@/views/learning/learning-type-edit/index.vue'
-import QuestionBankFavoriteView from '@/views/learning/question-bank-favorite/index.vue'
-import MoneySpendView from '@/views/learning/money-spend/index.vue'
-import QuestionBankScoreView from '@/views/learning/question-bank-score/index.vue'
-import WenWuRankView from '@/views/learning/question-bank-score/WenWuRankView.vue'
-import QuestionBankView from '@/views/learning/question-bank/index.vue'
-import ScoreRankingView from '@/views/learning/score-ranking/index.vue'
-import SettingsView from '@/views/settings/index.vue'
-import WrongBookView from '@/views/learning/wrong-book/index.vue'
-import MindmapViewerView from '@/views/tools/mindmap-viewer/index.vue'
-import MaterialOrganizeView from '@/views/tools/material-organize/index.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -22,62 +10,77 @@ const router = createRouter({
     {
       path: '/learning/type-edit',
       name: 'learning-type-edit',
-      component: LearningTypeEditView,
+      component: () => import('@/views/learning/learning-type-edit/index.vue'),
     },
     {
       path: '/learning/question-bank',
       name: 'question-bank',
-      component: QuestionBankView,
+      component: () => import('@/views/learning/question-bank/index.vue'),
     },
     {
       path: '/learning/question-bank-favorite',
       name: 'question-bank-favorite',
-      component: QuestionBankFavoriteView,
+      component: () => import('@/views/learning/question-bank-favorite/index.vue'),
     },
     {
       path: '/learning/question-bank-score',
       name: 'question-bank-score',
-      component: QuestionBankScoreView,
+      component: () => import('@/views/learning/question-bank-score/index.vue'),
     },
     {
       path: '/learning/money-spend',
       name: 'money-spend',
-      component: MoneySpendView,
+      component: () => import('@/views/learning/money-spend/index.vue'),
     },
     {
       path: '/learning/wen-wu-rank',
       name: 'wen-wu-rank',
-      component: WenWuRankView,
+      component: () => import('@/views/learning/question-bank-score/WenWuRankView.vue'),
     },
     {
       path: '/learning/score-ranking',
       name: 'score-ranking',
-      component: ScoreRankingView,
+      component: () => import('@/views/learning/score-ranking/index.vue'),
     },
     {
       path: '/learning/answer-log',
       name: 'answer-log',
-      component: AnswerLogView,
+      component: () => import('@/views/learning/answer-log/index.vue'),
     },
     {
       path: '/learning/wrong-book',
       name: 'wrong-book',
-      component: WrongBookView,
+      component: () => import('@/views/learning/wrong-book/index.vue'),
+    },
+    {
+      path: '/guide',
+      name: 'app-guide',
+      component: () => import('@/views/guide/index.vue'),
     },
     {
       path: '/settings',
       name: 'settings',
-      component: SettingsView,
+      component: () => import('@/views/settings/index.vue'),
     },
     {
       path: '/tools/mindmap-viewer',
       name: 'mindmap-viewer',
-      component: MindmapViewerView,
+      component: () => import('@/views/tools/mindmap-viewer/index.vue'),
     },
     {
       path: '/tools/material-organize',
       name: 'material-organize',
-      component: MaterialOrganizeView,
+      component: () => import('@/views/tools/material-organize/index.vue'),
+    },
+    {
+      path: '/tools/markdown-preview',
+      name: 'markdown-preview',
+      component: () => import('@/views/tools/markdown-preview/index.vue'),
+    },
+    {
+      path: '/tools/mental-math',
+      name: 'mental-math',
+      component: () => import('@/views/tools/mental-math/index.vue'),
     },
   ],
 })

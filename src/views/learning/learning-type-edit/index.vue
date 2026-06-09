@@ -117,7 +117,7 @@ onMounted(async () => {
       <span class="page-kicker">智学 01</span>
       <h2 class="page-title">学习类型编辑</h2>
       <p class="page-subtitle">
-        左侧管理分类树：添加根节点建立大类，选中节点后可添加子节点；右侧实时预览结构图。
+        左侧管理分类树：添加根节点建立大类，选中节点后可添加子节点；右侧以思维导图实时预览结构（可拖动、缩放）。
       </p>
     </header>
 
@@ -136,8 +136,16 @@ onMounted(async () => {
 
 <style scoped>
 .learning-type-page {
-  display: grid;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
+  overflow: hidden;
+}
+
+.page-hero {
+  flex-shrink: 0;
 }
 
 .learning-type-page p {
@@ -145,9 +153,34 @@ onMounted(async () => {
 }
 
 .type-layout {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: 420px 1fr;
   gap: 12px;
-  min-height: 620px;
+  align-items: stretch;
+  overflow: hidden;
+  --lt-edit-tree-indent: calc(var(--app-handout-font-size, 14px) * 1.15);
+  font-size: var(--app-handout-font-size, 14px);
+  line-height: var(--app-handout-line-height, 1.65);
+}
+
+.type-layout :deep(.type-edit-panel .type-tree-label) {
+  font-size: calc(var(--app-handout-font-size, 14px) * 0.9);
+  font-weight: 500;
+}
+
+.type-layout :deep(.type-edit-panel .type-tree-label.is-level-1) {
+  font-size: calc(var(--app-handout-font-size, 14px) * 1.42);
+  font-weight: 700;
+}
+
+.type-layout :deep(.type-edit-panel .type-tree-label.is-level-2) {
+  font-size: calc(var(--app-handout-font-size, 14px) * 1.12);
+  font-weight: 700;
+}
+
+.type-layout :deep(.type-edit-panel .el-tree-node__content) {
+  min-height: calc(var(--app-handout-font-size, 14px) * 2.35);
 }
 </style>

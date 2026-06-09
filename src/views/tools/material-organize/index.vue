@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { ElMessage } from 'element-plus'
-import DOMPurify from 'dompurify'
-import { marked } from 'marked'
 import { computed, ref } from 'vue'
+import { markdownToSafeHtml } from '@/utils/markdownToHtml'
 import RichTextEditor from '@/views/learning/question-bank/components/RichTextEditor.vue'
 import { isAiChatConfigured, requestLectureNotesFromMaterial } from '@/services/deepseek'
 import { hashForAiCache, rememberAiResponse } from '@/utils/aiResponseCache'
@@ -13,13 +12,7 @@ const generating = ref(false)
 const generateProgress = ref('')
 const showPreview = ref(true)
 
-const lectureHtml = computed(() => {
-  const md = lectureMd.value.trim()
-  if (!md) return ''
-  const raw = marked.parse(md, { async: false })
-  if (typeof raw !== 'string') return ''
-  return DOMPurify.sanitize(raw, { USE_PROFILES: { html: true } })
-})
+const lectureHtml = computed(() => markdownToSafeHtml(lectureMd.value))
 
 const generateLecture = async () => {
   const html = sourceHtml.value.trim()
@@ -299,8 +292,8 @@ const copyLecture = async () => {
 }
 
 .material-preview.prose {
-  font-size: 14px;
-  line-height: 1.65;
+  font-size: var(--app-handout-font-size, 14px);
+  line-height: var(--app-handout-line-height, 1.65);
   color: var(--app-text);
 }
 

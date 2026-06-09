@@ -11,7 +11,7 @@ const redrawMindmap = () => {
   void nextTick(() => markmapPreviewRef.value?.draw())
 }
 
-/** 去掉常见扩展名，用作题目名称 */
+/** 去掉常见扩展名，用作名称 */
 const titleFromImportedFileName = (fileName: string) => {
   const raw = fileName.trim()
   if (!raw) return ''
@@ -46,7 +46,7 @@ defineExpose({ draw: redrawMindmap })
       @change="onMindmapTxtImport"
     />
     <p class="field-hint">
-      选择 UTF-8 文本文件后将覆盖下方「思维导图文字」，并把「题目名称」设为该文件名（不含扩展名）。
+      选择 UTF-8 文本文件后将覆盖下方「思维导图文字」，并把「名称」设为该文件名（不含扩展名）。
     </p>
   </div>
   <label>

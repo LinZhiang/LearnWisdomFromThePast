@@ -28,6 +28,22 @@ if (!fs.existsSync(envFile)) {
 const PORT = Number(process.env.PORT || 8787)
 const DEEPSEEK_KEY = (process.env.DEEPSEEK_API_KEY || '').trim()
 const UPSTREAM = (process.env.DEEPSEEK_API_BASE || 'https://api.deepseek.com').replace(/\/$/, '')
+/** 设为 1 才允许转发 deepseek-v4-pro / reasoner（默认降为 flash，避免误扣费） */
+const ALLOW_PRO_MODEL = String(process.env.WENGU_ALLOW_PRO_MODEL ?? '').trim() === '1'
+const FLASH_FALLBACK = 'deepseek-v4-flash'
+const WENGU_APP_SOURCE = 'wengu-learning-app'
+
+function normalizeOutboundModel(model, source) {
+  const m = String(model ?? '').trim()
+  if (!m || ALLOW_PRO_MODEL) return m || FLASH_FALLBACK
+  if (source !== WENGU_APP_SOURCE) return m || FLASH_FALLBACK
+  if (/v4-pro/i.test(m) || /^deepseek-reasoner$/i.test(m)) {
+    // eslint-disable-next-line no-console
+    console.warn(`[wengu-ai-proxy] 已禁止 Pro：${m} → ${FLASH_FALLBACK}（source=${source}）`)
+    return FLASH_FALLBACK
+  }
+  return m
+}
 
 /** 逗号分隔的前端源，如 https://a.com,https://b.com；不填则反射请求 Origin（仅适合开发） */
 const CORS_ORIGIN_RAW = (process.env.CORS_ORIGIN || '').trim()
@@ -81,11 +97,15 @@ app.post('/v1/chat/completions', async (req, res) => {
     return
   }
 
-  const body = req.body ?? {}
+  const body = { ...(req.body ?? {}) }
   const source = String(req.headers['x-wengu-ai-source'] ?? 'unknown').slice(0, 64)
-  const model = String(body.model ?? '(unset)').slice(0, 64)
+  const requestedModel = String(body.model ?? '(unset)').slice(0, 64)
+  const model = normalizeOutboundModel(body.model, source)
+  body.model = model
   // eslint-disable-next-line no-console
-  console.log(`[wengu-ai-proxy] model=${model} source=${source}`)
+  console.log(
+    `[wengu-ai-proxy] model=${model}${requestedModel !== model ? ` (was ${requestedModel})` : ''} source=${source}`,
+  )
 
   let upstreamStatus = 0
   let usage = null
@@ -145,11 +165,25 @@ app.post('/v1/chat/completions', async (req, res) => {
   }
 })
 
-app.listen(PORT, '0.0.0.0', () => {
+const httpServer = app.listen(PORT, '0.0.0.0', () => {
   // eslint-disable-next-line no-console
   console.log(`[wengu-ai-proxy] http://0.0.0.0:${PORT}  →  ${UPSTREAM}/chat/completions`)
   if (!DEEPSEEK_KEY) {
     // eslint-disable-next-line no-console
     console.warn('[wengu-ai-proxy] 警告：未读取到 DEEPSEEK_API_KEY，请在 server/.env 中配置')
   }
+})
+
+httpServer.on('error', (err) => {
+  if (err && err.code === 'EADDRINUSE') {
+    // eslint-disable-next-line no-console
+    console.error(
+      `[wengu-ai-proxy] 端口 ${PORT} 已被占用（常见：上次 dev:api 未退出，或我排查时启动的代理仍在运行）。\n` +
+        `  解决：关闭占用该端口的进程后重试 npm run dev:all；Windows 可在 PowerShell 执行：\n` +
+        `  Get-NetTCPConnection -LocalPort ${PORT} | Select OwningProcess\n` +
+        `  Stop-Process -Id <进程ID> -Force`,
+    )
+    process.exit(1)
+  }
+  throw err
 })

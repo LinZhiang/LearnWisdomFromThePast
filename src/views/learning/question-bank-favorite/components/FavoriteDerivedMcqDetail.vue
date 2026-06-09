@@ -5,6 +5,7 @@ import { questionBankService } from '@/services/data-services'
 import type { QuestionFavoriteTarget } from '@/services/favorite-question-helpers'
 import { sanitizeRichHtml } from '@/utils/sanitize'
 import DeepseekGeneralAssist from '@/views/learning/question-bank/components/DeepseekGeneralAssist.vue'
+import PageFocusToggle from '@/components/PageFocusToggle.vue'
 import QuestionBankFavoriteButton from '@/views/learning/question-bank/components/QuestionBankFavoriteButton.vue'
 
 const props = defineProps<{
@@ -40,7 +41,7 @@ const correctLabels = () =>
     .map((i) => props.payload.options[i])
     .filter(Boolean)
 
-const deepseekTitle = computed(() => `${props.payload.parentTitle} · 导图小题`)
+const deepseekTitle = computed(() => `${props.payload.parentTitle} · 导图选择`)
 </script>
 
 <template>
@@ -48,8 +49,8 @@ const deepseekTitle = computed(() => `${props.payload.parentTitle} · 导图小�
     <header class="derived-topbar">
       <div class="derived-title-block">
         <h3 class="derived-title">{{ payload.parentTitle }}</h3>
-        <ul class="derived-meta" aria-label="题目属性">
-          <li class="meta-chip">导图衍生小题</li>
+        <ul class="derived-meta" aria-label="内容属性">
+          <li class="meta-chip">导图选择题</li>
           <li class="meta-chip meta-chip-muted">{{ learningTypeName }}</li>
           <li class="meta-chip meta-chip-muted">
             {{ payload.mode === 'single' ? '单选' : '多选' }} · {{ payload.subIndex }}/{{
@@ -59,6 +60,7 @@ const deepseekTitle = computed(() => `${props.payload.parentTitle} · 导图小�
         </ul>
       </div>
       <div class="derived-actions">
+        <PageFocusToggle variant="stretch" />
         <QuestionBankFavoriteButton
           :learning-type-id="learningTypeId"
           :target="favoriteTarget()"
@@ -91,7 +93,7 @@ const deepseekTitle = computed(() => `${props.payload.parentTitle} · 导图小�
         </p>
       </div>
       <div v-if="parentQuestion?.analysis?.trim()" class="derived-section">
-        <h4>题目解析（母题）</h4>
+        <h4>解析（来源条目）</h4>
         <!-- eslint-disable-next-line vue/no-v-html -->
         <div class="derived-rich ql-snow ql-editor" v-html="safe(parentQuestion.analysis)" />
       </div>
@@ -203,8 +205,6 @@ const deepseekTitle = computed(() => `${props.payload.parentTitle} · 导图小�
 
 .derived-stem {
   margin: 0;
-  font-size: 15px;
-  line-height: 1.55;
 }
 
 .derived-options {

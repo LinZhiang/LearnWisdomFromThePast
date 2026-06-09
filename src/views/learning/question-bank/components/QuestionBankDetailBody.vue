@@ -2,7 +2,10 @@
 import '@vueup/vue-quill/dist/vue-quill.snow.css'
 import { computed, nextTick, ref, watch } from 'vue'
 import type { QuestionBank } from '@/db/models'
+import { handoutTestModeLabel } from '@/constants/question-bank-types'
 import { parseChoiceQuestionContent } from '@/utils/choiceQuestion'
+import MarkdownProsePreview from '@/components/MarkdownProsePreview.vue'
+import { markdownToSafeHtmlPerLine } from '@/utils/markdownToHtml'
 import { sanitizeRichHtml } from '@/utils/sanitize'
 import DeepseekGeneralAssist from './DeepseekGeneralAssist.vue'
 import MarkmapSvgPreview from './MarkmapSvgPreview.vue'
@@ -14,8 +17,18 @@ const props = defineProps<{
 const safe = (html?: string) => sanitizeRichHtml(html ?? '')
 
 const isMindmap = computed(() => props.question.type === 'mindmap')
+const isHandout = computed(() => props.question.type === 'handout')
 const isGeneral = computed(() => props.question.type === 'general')
 const isChoice = computed(() => props.question.type === 'choice')
+
+const handoutTestHint = computed(() =>
+  isHandout.value ? handoutTestModeLabel(props.question) : '',
+)
+
+/** 与 MarkdownSplitEditor 预览一致：按源码行逐行渲染，保留换行与段落结构 */
+const handoutPreviewHtml = computed(() =>
+  isHandout.value ? markdownToSafeHtmlPerLine(props.question.content ?? '') : '',
+)
 
 const choiceParsed = computed(() =>
   isChoice.value ? parseChoiceQuestionContent(props.question.content ?? '') : null,
@@ -62,8 +75,9 @@ watch(
       </div>
     </div>
     <div v-else ref="scrollEl" class="detail-scroll">
+      <p v-if="isHandout" class="handout-test-hint">{{ handoutTestHint }}</p>
       <div class="detail-section">
-        <h4>题目内容</h4>
+        <h4>{{ isHandout ? '讲义正文' : '题干与材料' }}</h4>
         <div v-if="isChoice" class="choice-detail-content">
           <p class="choice-detail-mode">选项类型：<strong>{{ choiceModeLabel }}</strong></p>
           <p class="choice-detail-label">正确答案</p>
@@ -72,11 +86,16 @@ watch(
           </ul>
           <p v-else class="choice-detail-empty">（未填写正确答案）</p>
         </div>
+        <MarkdownProsePreview
+          v-else-if="isHandout"
+          class="detail-rich handout-md-preview"
+          :html="handoutPreviewHtml"
+        />
         <!-- eslint-disable-next-line vue/no-v-html -->
         <div v-else class="detail-rich ql-snow ql-editor" v-html="safe(question.content)" />
       </div>
-      <div class="detail-section">
-        <h4>题目解析</h4>
+      <div v-if="!isHandout" class="detail-section">
+        <h4>解析</h4>
         <!-- eslint-disable-next-line vue/no-v-html -->
         <div class="detail-rich ql-snow ql-editor" v-html="safe(question.analysis)" />
       </div>
@@ -113,6 +132,16 @@ watch(
   border-radius: 12px;
   background: var(--app-surface);
   overflow: hidden;
+}
+
+.handout-test-hint {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--app-text-muted);
+  background: var(--app-surface-alt);
+  border-radius: 8px;
+  border: 1px solid var(--app-border-soft);
 }
 
 .detail-scroll--mindmap {
@@ -162,12 +191,7 @@ watch(
   min-height: 3rem;
   line-height: 1.65;
   max-width: 100%;
-  overflow-x: auto;
-}
-
-.detail-rich :deep(img) {
-  max-width: 100%;
-  height: auto;
+  min-width: 0;
 }
 
 .choice-detail-content {
@@ -175,8 +199,6 @@ watch(
   border-radius: 10px;
   padding: 14px 16px;
   background: var(--app-surface-alt);
-  font-size: 14px;
-  line-height: 1.65;
   color: var(--app-text, inherit);
 }
 

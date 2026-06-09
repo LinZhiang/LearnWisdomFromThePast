@@ -6,8 +6,19 @@ import {
   questionBankService,
 } from '@/services/data-services'
 import { parseFavoriteDerivedPayload } from '@/services/favorite-question-helpers'
+import { FAVORITE_UI, QUESTION_BANK_TYPE_LABELS } from '@/constants/question-bank-copy'
 import { validateChoiceQuestionJson } from '@/utils/choiceQuestion'
+import {
+  collectLeafDescendants,
+  collectSubtreeNodeIds,
+  findLearningTypeNodeById,
+} from '@/utils/learningTypeTree'
+import {
+  buildLearningTypeTreeBranches,
+  flattenLearningTypeTreeDisplay,
+} from '@/utils/questionBankTreeTable'
 import type { TestUnit } from '@/views/learning/question-bank/components/questionBankTestTypes'
+import { usePageFocusStore } from '@/stores/page-focus'
 
 type LearningTypeNode = LearningType & {
   level: number
@@ -15,6 +26,7 @@ type LearningTypeNode = LearningType & {
 }
 
 export function useQuestionBankFavoritePage() {
+  const pageFocusStore = usePageFocusStore()
   const learningTypes = ref<LearningType[]>([])
   const questionBanks = ref<QuestionBank[]>([])
   const favorites = ref<Awaited<ReturnType<typeof favoriteQuestionService.listAll>>>([])
@@ -29,11 +41,7 @@ export function useQuestionBankFavoritePage() {
   const viewingFavoriteId = ref<number | null>(null)
   const showQuestionTest = ref(false)
 
-  const typeTextMap: Record<QuestionBank['type'], string> = {
-    general: '一般题型',
-    choice: '选择题型',
-    mindmap: '思维导图',
-  }
+  const typeTextMap = QUESTION_BANK_TYPE_LABELS
 
   const getLearningTypeName = (id?: number) => {
     if (!id) return '未分类'
@@ -66,13 +74,56 @@ export function useQuestionBankFavoritePage() {
     return roots
   })
 
+  const selectedNode = computed(() => {
+    const id = selectedLearningTypeId.value
+    if (id == null) return null
+    return findLearningTypeNodeById(treeNodes.value, id)
+  })
+
+  const descendantLeafNodes = computed(() => {
+    const node = selectedNode.value
+    if (!node) return []
+    return collectLeafDescendants(node)
+  })
+
+  const isParentNodeSelected = computed(() => (selectedNode.value?.children.length ?? 0) > 0)
+
   const filteredFavorites = computed(() => {
     if (!selectedLearningTypeId.value) return []
+    const node = selectedNode.value
+    if (!node) return []
+    const idSet = new Set(collectSubtreeNodeIds(node))
     return favorites.value
-      .filter((f) => f.learningTypeId === selectedLearningTypeId.value)
-      .slice()
+      .filter((f) => f.learningTypeId != null && idSet.has(f.learningTypeId))
       .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
   })
+
+  const parentTreeBranches = computed(() => {
+    const node = selectedNode.value
+    if (!node || !isParentNodeSelected.value) return []
+    return buildLearningTypeTreeBranches(node, filteredFavorites.value, (f) => f.learningTypeId)
+  })
+
+  const expandedTreeBranchIds = ref<Set<string>>(new Set())
+
+  const parentTreeTableRows = computed(() =>
+    flattenLearningTypeTreeDisplay(parentTreeBranches.value, expandedTreeBranchIds.value),
+  )
+
+  const isTreeBranchExpanded = (branchId: string) => expandedTreeBranchIds.value.has(branchId)
+
+  const toggleTreeBranch = (branchId: string) => {
+    const next = new Set(expandedTreeBranchIds.value)
+    if (next.has(branchId)) next.delete(branchId)
+    else next.add(branchId)
+    expandedTreeBranchIds.value = next
+  }
+
+  const rowKeyForTreeRow = (row: (typeof parentTreeTableRows.value)[number], idx: number) => {
+    if (row.kind === 'branch') return `branch-${row.branchId}`
+    const item = row.item
+    return `entry-${item.id ?? idx}`
+  }
 
   const testQuestionBanks = computed<QuestionBank[]>(() => {
     const ids = new Set<number>()
@@ -142,11 +193,11 @@ export function useQuestionBankFavoritePage() {
       return `${derived.parentTitle} · ${s.length > 40 ? `${s.slice(0, 40)}…` : s}`
     }
     const q = questionBanks.value.find((x) => x.id === f.questionBankId)
-    return q?.title ?? (f.questionBankId != null ? `题库 #${f.questionBankId}` : '未知题目')
+    return q?.title ?? (f.questionBankId != null ? `题库 #${f.questionBankId}` : '未知条目')
   }
 
   const rowTypeLabel = (f: (typeof favorites.value)[number]) => {
-    if (parseFavoriteDerivedPayload(f.derivedPayloadJson)) return '导图衍生小题'
+    if (parseFavoriteDerivedPayload(f.derivedPayloadJson)) return '导图选择题'
     const q = questionBanks.value.find((x) => x.id === f.questionBankId)
     const t = q?.type ?? 'general'
     return typeTextMap[t]
@@ -185,6 +236,7 @@ export function useQuestionBankFavoritePage() {
   }
 
   const closeDetail = () => {
+    void pageFocusStore.exitStretchIfActive()
     viewingFavoriteId.value = null
     viewingDerivedLearningTypeId.value = null
     viewingBankQuestion.value = null
@@ -206,6 +258,7 @@ export function useQuestionBankFavoritePage() {
   }
 
   const closeQuestionTest = () => {
+    void pageFocusStore.exitStretchIfActive()
     showQuestionTest.value = false
   }
 
@@ -236,9 +289,17 @@ export function useQuestionBankFavoritePage() {
     viewingFavoriteId,
     showQuestionTest,
     typeTextMap,
+    FAVORITE_UI,
     getLearningTypeName,
     selectedLearningTypeName,
     treeNodes,
+    selectedNode,
+    descendantLeafNodes,
+    isParentNodeSelected,
+    parentTreeTableRows,
+    isTreeBranchExpanded,
+    toggleTreeBranch,
+    rowKeyForTreeRow,
     filteredFavorites,
     loadData,
     rowTitle,

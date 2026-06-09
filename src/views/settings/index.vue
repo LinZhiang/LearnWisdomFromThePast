@@ -1,13 +1,22 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useAppearanceStore } from '@/stores/appearance'
-import { APP_CACHE_FILE_PREFIX } from '@/constants/branding'
+import {
+  HANDOUT_FONT_SIZE_MAX,
+  HANDOUT_FONT_SIZE_MIN,
+  useAppearanceStore,
+} from '@/stores/appearance'
+import { APP_BANK_PACK_FILE_PREFIX, APP_CACHE_FILE_PREFIX } from '@/constants/branding'
 import {
   exportCacheSnapshot,
   importCacheSnapshot,
   previewCacheSnapshot,
 } from '@/services/cache-backup'
+import {
+  exportQuestionBankPack,
+  mergeQuestionBankPack,
+  previewQuestionBankPack,
+} from '@/services/question-bank-pack'
 import {
   BACKGROUND_IMAGE_SET_FEE,
   isBackgroundImageRemoval,
@@ -19,8 +28,15 @@ import BackgroundImageFitEditor from './components/BackgroundImageFitEditor.vue'
 import BackgroundMusicSection from './components/BackgroundMusicSection.vue'
 
 const appearanceStore = useAppearanceStore()
-const { backgroundColor, backgroundOpacity, backgroundImage, backgroundImageFit, chromeOpacity, themeStyle } =
-  storeToRefs(appearanceStore)
+const {
+  backgroundColor,
+  backgroundOpacity,
+  backgroundImage,
+  backgroundImageFit,
+  chromeOpacity,
+  themeStyle,
+  handoutFontSizePx,
+} = storeToRefs(appearanceStore)
 
 const showBackgroundFitEditor = computed(() =>
   isDataUrlBackground(backgroundImage.value.trim()),
@@ -36,9 +52,11 @@ onMounted(() => {
   }
 })
 const uploadMessage = ref('')
+const bankPackMessage = ref('')
 const bgUploadBusy = ref(false)
 const bgFileInputRef = ref<HTMLInputElement | null>(null)
 const cacheUploadRef = ref<HTMLInputElement | null>(null)
+const bankPackUploadRef = ref<HTMLInputElement | null>(null)
 
 const triggerBackgroundFilePick = () => {
   if (bgUploadBusy.value) {
@@ -50,10 +68,18 @@ const triggerBackgroundFilePick = () => {
 }
 
 const triggerCacheUpload = () => {
+  bankPackMessage.value = ''
   cacheUploadRef.value?.click()
+}
+
+const triggerBankPackUpload = () => {
+  uploadMessage.value = ''
+  bankPackUploadRef.value?.click()
 }
 const opacityPercent = computed(() => Math.round(backgroundOpacity.value * 100))
 const chromeOpacityPercent = computed(() => Math.round(chromeOpacity.value * 100))
+
+const handoutFontPresets = [14, 16, 18, 20, 24] as const
 
 const onThemeStyleChange = (v: string) => {
   if (v === 'light' || v === 'dark' || v === 'soft') {
@@ -117,7 +143,8 @@ const tryCompressAndSaveBackground = async (file: File): Promise<'ok' | 'storage
       uploadMessage.value = charge.message
       return 'billing_fail'
     }
-    void appearanceStore.initBackgroundImageFitFromUrl(dataUrl)
+    await appearanceStore.initBackgroundImageFitFromUrl(dataUrl)
+    await nextTick()
     if (charge.charged) {
       uploadMessage.value = `已保存本地背景图：${file.name}，扣除 ${BACKGROUND_IMAGE_SET_FEE} 元，当前余额 ${charge.balance} 元。可在下方拖动调整位置与缩放。`
     } else {
@@ -213,6 +240,65 @@ const uploadCacheFile = async (event: Event) => {
   }
   input.value = ''
 }
+
+const formatBankPackMergeSummary = (
+  result: Awaited<ReturnType<typeof mergeQuestionBankPack>>,
+) =>
+  [
+    `新增学习类型 ${result.learningTypesAdded} 个`,
+    `合并已有类型 ${result.learningTypesMerged} 个`,
+    `新增题库条目 ${result.questionBanksAdded} 条`,
+    `跳过重复条目 ${result.questionBanksSkipped} 条`,
+    result.questionBankAiPrepAdded + result.questionBankAiPrepSkipped > 0
+      ? `附带测验缓存：新增 ${result.questionBankAiPrepAdded}，跳过 ${result.questionBankAiPrepSkipped}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('；')
+
+const downloadBankPackFile = async () => {
+  const content = await exportQuestionBankPack()
+  const blob = new Blob([content], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `${APP_BANK_PACK_FILE_PREFIX}-${Date.now()}.json`
+  link.click()
+  URL.revokeObjectURL(url)
+  bankPackMessage.value = '题库包已下载（仅含学习类型与题库，不含错题与成绩）。'
+}
+
+const uploadBankPackFile = async (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  try {
+    const content = await file.text()
+    const preview = previewQuestionBankPack(content)
+    const dryRun = await mergeQuestionBankPack(content, { dryRun: true })
+    const confirmText = [
+      '将以「合并」方式导入题库，不会覆盖您的错题、收藏、答题日志与分数。',
+      `文件来源: ${preview.source === 'pack' ? '题库包' : '完整缓存（仅提取类型与题库）'}`,
+      `导出时间: ${preview.exportedAt || '未知'}`,
+      `文件中: 学习类型 ${preview.counts.learningTypes} 个，题库 ${preview.counts.questionBanks} 条`,
+      '预计结果:',
+      formatBankPackMergeSummary(dryRun),
+      '',
+      '是否继续导入？',
+    ].join('\n')
+    const confirmed = window.confirm(confirmText)
+    if (!confirmed) {
+      bankPackMessage.value = '已取消导入。'
+      input.value = ''
+      return
+    }
+    const result = await mergeQuestionBankPack(content)
+    bankPackMessage.value = `题库包导入完成：${formatBankPackMergeSummary(result)}。请刷新或进入学习题库查看。`
+  } catch {
+    bankPackMessage.value = '题库包导入失败，请确认文件为有效的题库包或缓存 JSON。'
+  }
+  input.value = ''
+}
 </script>
 
 <template>
@@ -222,9 +308,9 @@ const uploadCacheFile = async (event: Event) => {
       <span class="page-kicker">系统 01</span>
       <h2 class="page-title">界面设置</h2>
       <p class="page-subtitle">
-        支持设置背景颜色、背景图片和整体风格，设置会自动保存。上传<strong>本地背景图</strong>后可在取景框内拖动调整位置、用滑条缩放（不另扣费）。新设或更换背景时，余额足够则扣
+        支持设置背景颜色、背景图片和整体风格，设置会自动保存。上传<strong>本地背景图</strong>后可在取景框内拖动调整位置、用滑条缩放与旋转，并支持水平/垂直翻转与「重置取景」（不另扣费）。新设或更换背景时，余额足够则扣
         <strong>{{ BACKGROUND_IMAGE_SET_FEE }} 元</strong>（不设宵禁与余额门槛；不足时跳过扣费仍可设置；清空 URL 去除背景不扣费）。有背景图时，半透明背景色会叠在图片上方；切换整体风格时会将背景色同步为该风格的推荐色（你可再微调）。深色/柔和下若仍为默认白且透明度
-        100%，则视为不叠色以免挡住主题底色。顶栏与内容面板透明度只降低衬底不透明度，文字与正文内图片不受影响；拉得过低时可配合毛玻璃略微提亮可读性。
+        100%，则视为不叠色以免挡住主题底色。顶栏与内容面板透明度只降低衬底不透明度，文字与正文内图片不受影响；拉得过低时可配合毛玻璃略微提亮可读性。学习内容字号（讲义、题目查看、测验）可在下方单独调节，便于课堂投影。
       </p>
     </header>
 
@@ -292,6 +378,7 @@ const uploadCacheFile = async (event: Event) => {
 
       <BackgroundImageFitEditor
         v-if="showBackgroundFitEditor"
+        :key="backgroundImage"
         :image-url="backgroundImage"
       />
 
@@ -324,21 +411,87 @@ const uploadCacheFile = async (event: Event) => {
           "
         />
       </label>
+
+      <div class="settings-item settings-item--handout-font">
+        <span>学习内容字号（{{ handoutFontSizePx }}px）</span>
+        <input
+          :value="handoutFontSizePx"
+          type="range"
+          :min="HANDOUT_FONT_SIZE_MIN"
+          :max="HANDOUT_FONT_SIZE_MAX"
+          step="1"
+          @input="
+            appearanceStore.updateHandoutFontSizePx(
+              Number(($event.target as HTMLInputElement).value),
+            )
+          "
+        />
+        <div class="settings-handout-font-presets">
+          <el-button
+            v-for="px in handoutFontPresets"
+            :key="px"
+            size="small"
+            :type="handoutFontSizePx === px ? 'primary' : 'default'"
+            plain
+            @click="appearanceStore.updateHandoutFontSizePx(px)"
+          >
+            {{ px }}px
+          </el-button>
+        </div>
+        <p class="settings-item-hint">
+          讲义编辑/预览、题目查看（含选择题题干与选项）、题目测验正文与选项、收藏错题详情等共用同一字号；标题与公式随正文同比放大。
+        </p>
+      </div>
     </div>
 
     <p v-if="uploadMessage" class="settings-message">{{ uploadMessage }}</p>
 
-    <div class="settings-actions">
-      <el-button class="settings-action-btn" @click="downloadCacheFile">下载缓存文件</el-button>
-      <el-button class="settings-action-btn" @click="triggerCacheUpload">上传缓存文件</el-button>
+    <div class="settings-data-block">
+      <h3 class="settings-data-block__title">数据备份</h3>
+      <p class="settings-item-hint">
+        学习数据保存在本机浏览器。换机或清空前请导出备份；也可只分享或获取「学习类型 + 题库」而不动个人记录。
+      </p>
+
+      <div class="settings-data-sub">
+        <span class="settings-data-sub__label">完整缓存（换机恢复）</span>
+        <p class="settings-data-sub__desc">
+          下载或上传后会包含错题、收藏、答题日志、分数等全部内容；上传将<strong>覆盖</strong>当前本地数据。
+        </p>
+        <div class="settings-actions settings-actions--pair">
+          <el-button class="settings-action-btn" @click="downloadCacheFile">下载缓存文件</el-button>
+          <el-button class="settings-action-btn" @click="triggerCacheUpload">上传缓存文件</el-button>
+        </div>
+        <input
+          ref="cacheUploadRef"
+          type="file"
+          class="settings-file-input"
+          accept="application/json,.json"
+          @change="uploadCacheFile"
+        />
+      </div>
+
+      <div class="settings-data-sub">
+        <span class="settings-data-sub__label">题库包（仅学习类型与题库）</span>
+        <p class="settings-data-sub__desc">
+          适合从他处获取题库：只合并目录树和题目，<strong>不改动</strong>错题本、收藏、答题日志与分数。同一学习类型下「类型 + 标题」相同的条目视为重复并跳过；目录按「父节点 + 名称」自动对齐，不重复建类。
+        </p>
+        <div class="settings-actions settings-actions--pair">
+          <el-button class="settings-action-btn" @click="downloadBankPackFile">下载题库包</el-button>
+          <el-button class="settings-action-btn" @click="triggerBankPackUpload">合并导入题库包</el-button>
+        </div>
+        <input
+          ref="bankPackUploadRef"
+          type="file"
+          class="settings-file-input"
+          accept="application/json,.json"
+          @change="uploadBankPackFile"
+        />
+        <p v-if="bankPackMessage" class="settings-message settings-message--inline">{{ bankPackMessage }}</p>
+      </div>
+    </div>
+
+    <div class="settings-actions settings-actions--single">
       <el-button class="settings-action-btn" @click="appearanceStore.reset">恢复默认</el-button>
-      <input
-        ref="cacheUploadRef"
-        type="file"
-        class="settings-file-input"
-        accept="application/json,.json"
-        @change="uploadCacheFile"
-      />
     </div>
   </section>
 
@@ -406,6 +559,19 @@ const uploadCacheFile = async (event: Event) => {
   padding: 0;
 }
 
+.settings-item-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+
+.settings-handout-font-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .settings-item--bg-upload .settings-bg-upload-row {
   display: flex;
   flex-wrap: wrap;
@@ -432,11 +598,53 @@ const uploadCacheFile = async (event: Event) => {
   color: var(--app-text-muted);
 }
 
+.settings-data-block {
+  margin-top: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--app-border-soft);
+  display: grid;
+  gap: 16px;
+}
+
+.settings-data-block__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--app-text);
+}
+
+.settings-data-sub {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-data-sub__label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--app-text);
+}
+
+.settings-data-sub__desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--app-text-muted);
+}
+
 .settings-actions {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
-  margin-top: 16px;
+  margin-top: 4px;
+}
+
+.settings-actions--pair {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-actions--single {
+  grid-template-columns: 1fr;
+  margin-top: 12px;
 }
 
 .settings-actions :deep(.settings-action-btn) {

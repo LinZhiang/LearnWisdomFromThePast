@@ -240,12 +240,14 @@ const onRemove = (id?: number) => {
 .type-edit-panel {
   display: flex;
   flex-direction: column;
+  height: 100%;
+  min-height: 0;
   border: 1px solid var(--app-border-soft);
   border-radius: 10px;
   padding: 12px;
   background: var(--app-surface);
-  min-height: 620px;
   overflow: hidden;
+  box-sizing: border-box;
 }
 
 .type-edit-toolbar {
@@ -266,10 +268,14 @@ const onRemove = (id?: number) => {
 }
 
 .type-tree-wrap {
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
-  overflow: auto;
-  padding: 10px 0;
+  margin-right: -12px;
+  padding: 8px 12px 8px 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
 }
 
 .type-edit-muted,
@@ -295,7 +301,6 @@ const onRemove = (id?: number) => {
 }
 
 .type-tree-wrap :deep(.el-tree-node__content) {
-  min-height: 36px;
   border-radius: 8px;
 }
 
@@ -315,20 +320,16 @@ const onRemove = (id?: number) => {
 }
 
 .type-tree-label {
-  font-size: 14px;
-  font-weight: 500;
-  line-height: 1.5;
+  line-height: inherit;
   color: var(--app-text);
 }
 
 .type-tree-label.is-level-1 {
-  font-size: 16px;
-  font-weight: 700;
+  line-height: 1.45;
 }
 
 .type-tree-label.is-level-2 {
-  font-size: 15px;
-  font-weight: 650;
+  line-height: 1.4;
 }
 
 .type-edit-selection {

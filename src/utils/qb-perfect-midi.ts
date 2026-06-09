@@ -1,42 +1,57 @@
-import JZZ from 'jzz'
-import SMF from 'jzz-midi-smf'
-import Tiny from 'jzz-synth-tiny'
 import qbPerfectMidiUrl from '@/assets/voice/A_085XGW.MID?url'
 
+type JzzModule = typeof import('jzz')
+type SmfModule = typeof import('jzz-midi-smf')
+type TinyModule = typeof import('jzz-synth-tiny')
+
+type JzzInstance = JzzModule['default']
 type MidiPlayer = ReturnType<
-  InstanceType<typeof JZZ.MIDI.SMF>['player']
+  InstanceType<JzzInstance['MIDI']['SMF']>['player']
 >
 
+let jzzBundle: {
+  JZZ: JzzInstance
+} | null = null
 let jzzMidiReady = false
 let activePlayer: MidiPlayer | null = null
 
-function ensureJzzMidi(): void {
-  if (jzzMidiReady) return
-  SMF(JZZ)
-  Tiny(JZZ)
-  JZZ.synth.Tiny.register('Web Audio')
-  jzzMidiReady = true
+async function loadJzzBundle() {
+  if (jzzBundle) return jzzBundle
+  const [JZZ, SMF, Tiny] = await Promise.all([
+    import('jzz'),
+    import('jzz-midi-smf'),
+    import('jzz-synth-tiny'),
+  ])
+  jzzBundle = { JZZ: JZZ.default }
+  if (!jzzMidiReady) {
+    ;(SMF.default as SmfModule['default'])(JZZ.default)
+    ;(Tiny.default as TinyModule['default'])(JZZ.default)
+    JZZ.default.synth.Tiny.register('Web Audio')
+    jzzMidiReady = true
+  }
+  return jzzBundle
 }
 
 /** JZZ 使用 Web Audio；与 HTML Audio 背景音乐并存时需先 resume 上下文 */
-async function ensureWebAudioRunning(): Promise<boolean> {
-  ensureJzzMidi()
+async function ensureWebAudioRunning(): Promise<{ JZZ: JzzInstance } | null> {
+  const bundle = await loadJzzBundle()
+  const { JZZ } = bundle
   const ac = JZZ.lib.getAudioContext?.() as AudioContext | undefined
-  if (!ac) return false
+  if (!ac) return null
   if (ac.state === 'suspended') {
     try {
       await ac.resume()
     } catch {
-      return false
+      return null
     }
   }
   if (ac.state !== 'running') {
     await new Promise<void>((r) => window.setTimeout(r, 80))
   }
-  return ac.state === 'running'
+  return ac.state === 'running' ? bundle : null
 }
 
-function openMidiAndPlay(player: MidiPlayer): Promise<boolean> {
+function openMidiAndPlay(JZZ: JzzInstance, player: MidiPlayer): Promise<boolean> {
   return new Promise((resolve) => {
     JZZ()
       .openMidiOut('Web Audio')
@@ -64,15 +79,16 @@ function openMidiAndPlay(player: MidiPlayer): Promise<boolean> {
 export async function startQbPerfectMidi(): Promise<boolean> {
   stopQbPerfectMidi()
   try {
-    const audioOk = await ensureWebAudioRunning()
-    if (!audioOk) return false
+    const bundle = await ensureWebAudioRunning()
+    if (!bundle) return false
+    const { JZZ } = bundle
 
     const res = await fetch(qbPerfectMidiUrl)
     if (!res.ok) return false
     const buf = await res.arrayBuffer()
     const smf = new JZZ.MIDI.SMF(buf)
     const player = smf.player()
-    return await openMidiAndPlay(player)
+    return await openMidiAndPlay(JZZ, player)
   } catch {
     return false
   }

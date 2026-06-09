@@ -51,14 +51,14 @@ const onTreeSelect = (id: number | null) => {
       <header class="page-hero">
         <span class="page-kicker">智学 03</span>
         <h2 class="page-title">题库收藏</h2>
-        <p class="page-subtitle">按学习类型查看已收藏题目（含测验中 DeepSeek 生成的导图小题）。</p>
+        <p class="page-subtitle">按学习类型查看已收藏的学习内容（含测验中生成的导图选择题等）。</p>
       </header>
       <div class="favorite-layout">
         <LearningTypeTreePanel
           :loading="fav.loading"
           :tree-nodes="fav.treeNodes"
           :selected-id="fav.selectedLearningTypeId"
-          :leaf-selectable-only="true"
+          :leaf-selectable-only="false"
           @update:selected-id="onTreeSelect"
         />
         <FavoriteQuestionListPanel
@@ -67,11 +67,22 @@ const onTreeSelect = (id: number | null) => {
           :selected-learning-type-name="fav.selectedLearningTypeName"
           :message="fav.message"
           :rows="fav.filteredFavorites"
+          :is-parent-node-selected="fav.isParentNodeSelected"
+          :parent-hint="
+            fav.FAVORITE_UI.parentHint(
+              fav.descendantLeafNodes.length,
+              fav.filteredFavorites.length,
+            )
+          "
+          :parent-tree-table-rows="fav.parentTreeTableRows"
+          :is-tree-branch-expanded="fav.isTreeBranchExpanded"
+          :row-key-for-tree-row="fav.rowKeyForTreeRow"
           :row-title="fav.rowTitle"
           :row-type-label="fav.rowTypeLabel"
           @open="fav.openFavoriteRow($event)"
           @remove="fav.removeFavorite($event)"
           @test="fav.openQuestionTest"
+          @toggle-branch="fav.toggleTreeBranch"
         />
       </div>
     </template>
@@ -79,9 +90,23 @@ const onTreeSelect = (id: number | null) => {
 </template>
 
 <style scoped>
-.favorite-page {
+.favorite-page:not(.is-detail-view) {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+}
+
+.favorite-page.is-detail-view {
   display: grid;
   gap: 12px;
+}
+
+.page-hero {
+  flex-shrink: 0;
 }
 
 .favorite-page.is-detail-view {
@@ -94,14 +119,32 @@ const onTreeSelect = (id: number | null) => {
 }
 
 .favorite-layout {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: 420px 1fr;
   gap: 12px;
-  align-items: start;
-  height: calc(100vh - 230px);
+  align-items: stretch;
+  overflow: hidden;
+  --fav-tree-indent: calc(var(--app-handout-font-size, 14px) * 1.15);
+  font-size: var(--app-handout-font-size, 14px);
+  line-height: var(--app-handout-line-height, 1.65);
 }
 
-.favorite-layout :deep(.type-panel) {
-  overflow: auto;
+/* 左侧学习类型树：字号随「学习内容字号」设置联动（与学习题库 / 错题本一致） */
+.favorite-layout :deep(.type-panel .node-label) {
+  font-size: calc(var(--app-handout-font-size, 14px) * 0.9);
+}
+
+.favorite-layout :deep(.type-panel .node-label-level-1) {
+  font-size: calc(var(--app-handout-font-size, 14px) * 1.42);
+}
+
+.favorite-layout :deep(.type-panel .node-label-level-2) {
+  font-size: calc(var(--app-handout-font-size, 14px) * 1.12);
+}
+
+.favorite-layout :deep(.type-panel .el-tree-node__content) {
+  min-height: calc(var(--app-handout-font-size, 14px) * 2.35);
 }
 </style>

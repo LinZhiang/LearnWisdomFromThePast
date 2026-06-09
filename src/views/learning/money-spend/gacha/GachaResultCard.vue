@@ -156,13 +156,13 @@ const portraitImgStyle = computed(() => {
   height: auto;
 }
 
-/* 汇总/条带：以槽位宽度为准，避免矮格子把卡面挤成竖条 */
+/* 汇总/条带：以槽位宽度为准，保持 5:2 横条比例 */
 .gacha-card--grid .gacha-card-inner {
   width: 100%;
   max-width: 100%;
   aspect-ratio: 5 / 2;
   height: auto;
-  max-height: min(100cqh, calc(100cqw * 2 / 5));
+  max-height: none;
 }
 
 .gacha-card--featured .gacha-card-inner {

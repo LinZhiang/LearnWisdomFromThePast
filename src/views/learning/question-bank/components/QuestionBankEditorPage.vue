@@ -1,9 +1,19 @@
 <script setup lang="ts">
+import { ElMessage } from 'element-plus'
 import { nextTick, provide, reactive, ref, watch } from 'vue'
+import { markdownHasUnresolvedEmbedRefs } from '@/utils/markdownEmbeddedImages'
 import type { QuestionBank } from '@/db/models'
+import { QBANK_UI } from '@/constants/question-bank-copy'
+import { questionBankNoScoreType } from '@/constants/question-bank-types'
+import {
+  HANDOUT_GENERAL_COUNT_DEFAULT,
+  HANDOUT_JUDGMENT_COUNT_DEFAULT,
+  HANDOUT_MCQ_COUNT_DEFAULT,
+} from '@/utils/handoutQuestion'
 import {
   parseChoiceQuestionContent,
   serializeChoiceQuestionPayload,
+  validateChoiceQuestionJson,
   type ChoiceQuestionPayload,
 } from '@/utils/choiceQuestion'
 import { htmlToPlainText } from '@/utils/htmlToText'
@@ -11,38 +21,56 @@ import DeepseekGeneralAssist from './DeepseekGeneralAssist.vue'
 import QuestionBankEditorBasics from './QuestionBankEditorBasics.vue'
 import QuestionBankEditorChoiceFields from './QuestionBankEditorChoiceFields.vue'
 import QuestionBankEditorFooter from './QuestionBankEditorFooter.vue'
+import QuestionBankEditorHandoutFields from './QuestionBankEditorHandoutFields.vue'
 import QuestionBankEditorMindmapFields from './QuestionBankEditorMindmapFields.vue'
 import { questionBankEditorChoicePayloadKey } from './questionBankEditorInject'
 import RichTextEditor from './RichTextEditor.vue'
 
-type EditorForm = {
+export type QuestionBankEditorForm = {
   type: QuestionBank['type']
   title: string
+  learningTypeId?: string
   score: string
   content: string
   analysis: string
+  handoutAutoMcq: boolean
+  handoutMcqCount: number
+  handoutAutoGeneral: boolean
+  handoutGeneralCount: number
+  handoutAutoJudgment: boolean
+  handoutJudgmentCount: number
 }
 
 const props = defineProps<{
   mode: 'create' | 'edit'
   loading?: boolean
-  initialForm: EditorForm
+  initialForm: QuestionBankEditorForm
+  createLearningTypeName?: string
+  learningTypeOptions?: { value: number; label: string }[]
 }>()
 
 const emit = defineEmits<{
   (e: 'back'): void
-  (e: 'submit', value: EditorForm): void
+  (e: 'submit', value: QuestionBankEditorForm): void
 }>()
 
-const form = reactive<EditorForm>({
+const form = reactive<QuestionBankEditorForm>({
   type: 'general',
   title: '',
+  learningTypeId: '',
   score: '0',
   content: '',
   analysis: '',
+  handoutAutoMcq: false,
+  handoutMcqCount: HANDOUT_MCQ_COUNT_DEFAULT,
+  handoutAutoGeneral: false,
+  handoutGeneralCount: HANDOUT_GENERAL_COUNT_DEFAULT,
+  handoutAutoJudgment: false,
+  handoutJudgmentCount: HANDOUT_JUDGMENT_COUNT_DEFAULT,
 })
 
 const mindmapFieldsRef = ref<InstanceType<typeof QuestionBankEditorMindmapFields> | null>(null)
+const handoutFieldsRef = ref<InstanceType<typeof QuestionBankEditorHandoutFields> | null>(null)
 
 const choiceUiHydrating = ref(false)
 
@@ -103,9 +131,16 @@ watch(
   (value) => {
     form.type = value.type
     form.title = value.title
-    form.score = value.type === 'mindmap' ? '0' : value.score
+    form.learningTypeId = value.learningTypeId ?? ''
+    form.score = questionBankNoScoreType({ type: value.type } as QuestionBank) ? '0' : value.score
     form.content = value.content
     form.analysis = value.analysis
+    form.handoutAutoMcq = value.handoutAutoMcq
+    form.handoutMcqCount = value.handoutMcqCount
+    form.handoutAutoGeneral = value.handoutAutoGeneral
+    form.handoutGeneralCount = value.handoutGeneralCount
+    form.handoutAutoJudgment = value.handoutAutoJudgment
+    form.handoutJudgmentCount = value.handoutJudgmentCount
     if (value.type === 'choice') {
       hydrateChoiceFromForm()
     }
@@ -116,7 +151,58 @@ watch(
   { immediate: true },
 )
 
-const submit = () => emit('submit', { ...form })
+const submit = () => {
+  if (!form.title.trim()) {
+    ElMessage.error('名称不能为空。')
+    return
+  }
+  if (props.mode === 'edit' && !form.learningTypeId?.trim()) {
+    ElMessage.error('请选择所属分类。')
+    return
+  }
+  if (form.type === 'handout') {
+    const flushed = handoutFieldsRef.value?.flushContentForSave()
+    if (flushed != null) {
+      form.content = flushed
+    }
+    if (markdownHasUnresolvedEmbedRefs(form.content)) {
+      ElMessage.error(
+        '讲义中有图片占位符未带上实际图片数据，保存会丢失多媒体内容。请重新插入图片，或从备份 Markdown 恢复后再保存。',
+      )
+      return
+    }
+    if (!form.content.trim()) {
+      ElMessage.error('讲义 Markdown 内容不能为空。')
+      return
+    }
+  }
+  if (form.type === 'mindmap' && !form.content.trim()) {
+    ElMessage.error('思维导图文字不能为空。')
+    return
+  }
+  if (form.type === 'choice') {
+    const cv = validateChoiceQuestionJson(form.content)
+    if (!cv.ok) {
+      ElMessage.error(cv.message ?? '请完善选择题。')
+      return
+    }
+    if (!htmlToPlainText(form.analysis).trim()) {
+      ElMessage.error('解析不能为空。')
+      return
+    }
+  }
+  if (form.type === 'general') {
+    if (!htmlToPlainText(form.content).trim()) {
+      ElMessage.error('题干不能为空。')
+      return
+    }
+    if (!htmlToPlainText(form.analysis).trim()) {
+      ElMessage.error('解析不能为空。')
+      return
+    }
+  }
+  emit('submit', { ...form })
+}
 
 const redrawMindmap = () => {
   void nextTick(() => mindmapFieldsRef.value?.draw())
@@ -125,9 +211,12 @@ const redrawMindmap = () => {
 watch(
   () => form.type,
   (t, prev) => {
-    if (t === 'mindmap') {
+    if (t === 'mindmap' || t === 'handout') {
       form.score = '0'
-      redrawMindmap()
+      if (t === 'mindmap') redrawMindmap()
+      if (t === 'handout' && prev !== 'handout') {
+        form.analysis = ''
+      }
     } else if (t === 'choice') {
       if (prev === 'general') {
         const plain = htmlToPlainText(form.content)
@@ -138,7 +227,7 @@ watch(
         void nextTick(() => {
           choiceUiHydrating.value = false
         })
-      } else if (prev === 'mindmap') {
+      } else if (prev === 'mindmap' || prev === 'handout') {
         choiceUiHydrating.value = true
         choicePayload.mode = 'single'
         choicePayload.correctAnswers.splice(0, choicePayload.correctAnswers.length, '')
@@ -157,14 +246,24 @@ watch(
 <template>
   <section class="question-editor-page">
     <div class="question-editor-topbar">
-      <h3>{{ mode === 'edit' ? '编辑题目' : '新增题目' }}</h3>
+      <h3>{{ mode === 'edit' ? QBANK_UI.editorEditTitle : QBANK_UI.editorCreateTitle }}</h3>
       <div class="topbar-actions">
         <el-button plain @click="emit('back')">返回列表</el-button>
       </div>
     </div>
 
-    <div class="question-editor-panel">
-      <QuestionBankEditorBasics v-model:type="form.type" v-model:title="form.title" />
+    <div
+      class="question-editor-panel"
+      :class="{ 'question-editor-panel--handout': form.type === 'handout' }"
+    >
+      <QuestionBankEditorBasics
+        v-model:type="form.type"
+        v-model:title="form.title"
+        v-model:learning-type-id="form.learningTypeId"
+        :mode="mode"
+        :create-learning-type-name="createLearningTypeName"
+        :learning-type-options="learningTypeOptions"
+      />
 
       <template v-if="form.type === 'mindmap'">
         <QuestionBankEditorMindmapFields
@@ -174,19 +273,39 @@ watch(
         />
       </template>
 
+      <template v-else-if="form.type === 'handout'">
+        <QuestionBankEditorHandoutFields
+          ref="handoutFieldsRef"
+          v-model:content="form.content"
+          v-model:handout-auto-mcq="form.handoutAutoMcq"
+          v-model:handout-mcq-count="form.handoutMcqCount"
+          v-model:handout-auto-general="form.handoutAutoGeneral"
+          v-model:handout-general-count="form.handoutGeneralCount"
+          v-model:handout-auto-judgment="form.handoutAutoJudgment"
+          v-model:handout-judgment-count="form.handoutJudgmentCount"
+          @import-title="form.title = $event"
+        />
+        <DeepseekGeneralAssist
+          class="handout-deepseek"
+          :title="form.title"
+          :content-html="form.content"
+          analysis-html=""
+        />
+      </template>
+
       <template v-else>
         <label>
-          <span>题目分数（0+整数）</span>
+          <span>{{ QBANK_UI.formScore }}</span>
           <el-input v-model="form.score" inputmode="numeric" />
         </label>
         <label v-if="form.type === 'general'">
-          <span>题目内容（富文本）</span>
-          <RichTextEditor v-model="form.content" placeholder="请输入题目内容，可上传本地图片" />
+          <span>{{ QBANK_UI.formStem }}</span>
+          <RichTextEditor v-model="form.content" placeholder="请输入题干，可上传本地图片" />
         </label>
         <QuestionBankEditorChoiceFields v-else />
         <label>
-          <span>题目解析（富文本）</span>
-          <RichTextEditor v-model="form.analysis" placeholder="请输入题目解析，可上传本地图片" />
+          <span>{{ QBANK_UI.formAnalysis }}</span>
+          <RichTextEditor v-model="form.analysis" placeholder="请输入解析，可上传本地图片" />
         </label>
         <DeepseekGeneralAssist
           v-if="form.type === 'general'"
@@ -214,13 +333,19 @@ watch(
 
 <style scoped>
 .question-editor-page {
-  display: grid;
-  gap: 12px;
-  height: calc(100vh - 230px);
+  flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .question-editor-topbar {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -243,6 +368,7 @@ watch(
 }
 
 .question-editor-panel {
+  flex: 1 1 auto;
   border: 1px solid var(--app-border-soft);
   border-radius: 10px;
   padding: 14px 14px 26px;
@@ -251,7 +377,10 @@ watch(
   gap: 12px;
   min-height: 0;
   overflow-y: auto;
-  overflow-x: hidden;
+  overflow-x: auto;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+  align-content: start;
 }
 
 .question-editor-panel label {
@@ -266,5 +395,10 @@ watch(
 
 :deep(.ql-container) {
   min-height: 140px;
+}
+
+.question-editor-panel--handout {
+  display: block;
+  padding-bottom: 14px;
 }
 </style>

@@ -47,8 +47,8 @@ defineEmits<{
     <div class="test-summary-table">
       <div class="test-summary-head">
         <span>序号</span>
-        <span>题型</span>
-        <span>题目</span>
+        <span>类型</span>
+        <span>名称</span>
         <span>说明</span>
         <span>得分</span>
       </div>
@@ -310,21 +310,21 @@ defineEmits<{
 }
 
 .deepseek-md :deep(h1) {
-  font-size: 1.35rem;
+  font-size: 1.35em;
   border-bottom: 1px solid var(--app-border-soft);
   padding-bottom: 0.35em;
 }
 
 .deepseek-md :deep(h2) {
-  font-size: 1.2rem;
+  font-size: 1.2em;
 }
 
 .deepseek-md :deep(h3) {
-  font-size: 1.05rem;
+  font-size: 1.05em;
 }
 
 .deepseek-md :deep(h4) {
-  font-size: 1rem;
+  font-size: 1em;
 }
 
 .deepseek-md :deep(p) {
@@ -359,13 +359,13 @@ defineEmits<{
 
 .deepseek-md :deep(pre) {
   margin: 0.65em 0;
-  padding: 10px 12px;
+  padding: 0.65em 0.85em;
   border-radius: 8px;
   border: 1px solid var(--app-border-soft);
   background: var(--app-surface);
   overflow-x: auto;
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: 1em;
+  line-height: 1.55;
   max-width: 100%;
   box-sizing: border-box;
 }
@@ -388,13 +388,15 @@ defineEmits<{
   width: 100%;
   border-collapse: collapse;
   margin: 0.65em 0;
-  font-size: 13px;
+  font-size: 1em;
 }
 
 .deepseek-md :deep(th),
 .deepseek-md :deep(td) {
   border: 1px solid var(--app-border-soft);
-  padding: 6px 10px;
+  padding: 0.45em 0.65em;
+  font-size: inherit;
+  line-height: 1.5;
   text-align: left;
 }
 

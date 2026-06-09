@@ -14,7 +14,7 @@ const emit = defineEmits<{
   <div class="question-bank-actions">
     <el-button plain @click="emit('cancel')">取消</el-button>
     <el-button type="primary" :loading="loading" @click="emit('submit')">
-      {{ mode === 'edit' ? '保存修改' : '新增题目' }}
+      {{ mode === 'edit' ? '保存修改' : '保存并新建' }}
     </el-button>
   </div>
 </template>

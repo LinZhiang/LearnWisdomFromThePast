@@ -28,7 +28,7 @@ const draw = async () => {
   if (!svgRef.value) return
   svgRef.value.innerHTML = ''
   const md = props.markdown?.trim() ? props.markdown : '# '
-  renderMindmap(svgRef.value, md, { initialExpandLevel: props.initialExpandLevel })
+  await renderMindmap(svgRef.value, md, { initialExpandLevel: props.initialExpandLevel })
 }
 
 watch(

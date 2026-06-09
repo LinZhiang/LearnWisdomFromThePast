@@ -1,4 +1,4 @@
-import { createWorker, type Worker } from 'tesseract.js'
+import type { Worker } from 'tesseract.js'
 import {
   compressImageDataUrl,
   type RichMaterialImage,
@@ -14,6 +14,7 @@ async function getOcrWorker(): Promise<Worker> {
   if (ocrWorker) return ocrWorker
   if (!ocrWorkerInit) {
     ocrWorkerInit = (async () => {
+      const { createWorker } = await import('tesseract.js')
       const worker = await createWorker('chi_sim+eng', 1, {
         logger: () => {},
       })

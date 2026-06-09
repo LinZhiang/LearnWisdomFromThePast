@@ -1,9 +1,22 @@
-import { Transformer } from 'markmap-lib'
-import { Markmap } from 'markmap-view'
+type MarkmapModule = typeof import('markmap-view')
+type TransformerModule = typeof import('markmap-lib')
 
-const transformer = new Transformer()
+let markmapModules: {
+  Markmap: MarkmapModule['Markmap']
+  Transformer: TransformerModule['Transformer']
+} | null = null
 
-export const renderMindmap = (
+async function loadMarkmapModules() {
+  if (markmapModules) return markmapModules
+  const [{ Markmap }, { Transformer }] = await Promise.all([
+    import('markmap-view'),
+    import('markmap-lib'),
+  ])
+  markmapModules = { Markmap, Transformer }
+  return markmapModules
+}
+
+export const renderMindmap = async (
   svgElement: SVGSVGElement,
   markdown: string,
   options?: {
@@ -11,6 +24,8 @@ export const renderMindmap = (
     initialExpandLevel?: number
   },
 ) => {
+  const { Markmap, Transformer } = await loadMarkmapModules()
+  const transformer = new Transformer()
   const { root } = transformer.transform(markdown)
   const markmapOptions =
     options?.initialExpandLevel == null ?

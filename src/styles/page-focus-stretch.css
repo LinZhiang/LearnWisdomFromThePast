@@ -1,0 +1,217 @@
+/* 查看/测验题目：全屏拉伸（配合 app-shell--page-focus-stretch） */
+
+.app-shell--page-focus-stretch {
+  height: 100%;
+  min-height: 100dvh;
+}
+
+.app-shell--page-focus-stretch .page-content--internal-scroll .page-viewport > * {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-shell--page-focus-stretch .app-shell__bg-image,
+.app-shell--page-focus-stretch .app-shell__bg-tint {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.app-shell--page-focus-stretch .page-content {
+  padding: 0 !important;
+}
+
+.app-shell--page-focus-stretch .page-viewport {
+  overflow: hidden;
+}
+
+.app-shell--page-focus-stretch .question-bank-page.is-detail-view,
+.app-shell--page-focus-stretch .favorite-page.is-detail-view,
+.app-shell--page-focus-stretch .wrong-book-page.is-detail-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
+  width: 100%;
+  gap: 0;
+  box-sizing: border-box;
+}
+
+.app-shell--page-focus-stretch .wrong-book-detail-shell {
+  flex: 1;
+  min-height: 0;
+  gap: 6px;
+  padding: 0 8px 8px;
+  box-sizing: border-box;
+}
+
+.app-shell--page-focus-stretch .question-detail-page {
+  max-width: none !important;
+  width: 100% !important;
+  margin: 0 !important;
+  max-height: none !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  flex: 1 1 auto;
+  gap: 6px;
+  padding: 6px 8px max(6px, env(safe-area-inset-bottom, 0px));
+  box-sizing: border-box;
+  --detail-bottom-breath: max(6px, env(safe-area-inset-bottom, 0px));
+}
+
+.app-shell--page-focus-stretch .question-detail-page.is-mindmap-detail {
+  min-height: 0 !important;
+  margin-bottom: 0 !important;
+  padding: 4px 6px max(4px, env(safe-area-inset-bottom, 0px));
+  gap: 4px;
+}
+
+.app-shell--page-focus-stretch .question-detail-page .detail-page-columns {
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 8px;
+}
+
+.app-shell--page-focus-stretch .question-detail-page .detail-column-aside {
+  flex: 0 0 min(28vw, 320px);
+}
+
+/* 深度全屏：顶栏标题与操作分行，避免收藏/返回/编辑等按钮被挤出或裁切 */
+.app-shell--page-focus-stretch .question-detail-page {
+  overflow: visible;
+}
+
+.app-shell--page-focus-stretch .question-detail-page :deep(.detail-topbar) {
+  overflow: visible;
+  position: relative;
+  z-index: 3;
+}
+
+.app-shell--page-focus-stretch .question-detail-page :deep(.detail-topbar-row) {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.app-shell--page-focus-stretch .question-detail-page :deep(.detail-title-block) {
+  width: 100%;
+  min-width: 0;
+}
+
+.app-shell--page-focus-stretch .question-detail-page :deep(.detail-actions) {
+  width: 100%;
+  justify-content: flex-end;
+  row-gap: 8px;
+}
+
+.app-shell--page-focus-stretch .wrong-detail-page {
+  overflow: visible;
+}
+
+.app-shell--page-focus-stretch .wrong-detail-topbar {
+  flex-direction: column;
+  align-items: stretch;
+  overflow: visible;
+  position: relative;
+  z-index: 3;
+}
+
+.app-shell--page-focus-stretch .wrong-detail-actions {
+  width: 100%;
+  justify-content: flex-end;
+}
+
+.app-shell--page-focus-stretch .favorite-derived-page :deep(.derived-topbar) {
+  overflow: visible;
+  position: relative;
+  z-index: 3;
+}
+
+.app-shell--page-focus-stretch .favorite-derived-page :deep(.derived-actions) {
+  width: 100%;
+  justify-content: flex-end;
+}
+
+.app-shell--page-focus-stretch .question-test-page :deep(.test-topbar) {
+  overflow: visible;
+  position: relative;
+  z-index: 3;
+}
+
+.app-shell--page-focus-stretch .question-test-page :deep(.test-topbar-row) {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.app-shell--page-focus-stretch .question-test-page :deep(.test-title-block) {
+  width: 100%;
+  min-width: 0;
+}
+
+.app-shell--page-focus-stretch .question-test-page :deep(.test-topbar-actions) {
+  width: 100%;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+.app-shell--page-focus-stretch .favorite-derived-page {
+  max-width: none !important;
+  width: 100% !important;
+  margin: 0 !important;
+  height: 100% !important;
+  flex: 1;
+  min-height: 0;
+  padding: 6px 8px;
+  box-sizing: border-box;
+}
+
+.app-shell--page-focus-stretch .wrong-detail-page {
+  max-width: none !important;
+  width: 100% !important;
+  margin: 0 !important;
+  height: 100% !important;
+  flex: 1;
+  min-height: 0;
+  padding: 6px 8px;
+  box-sizing: border-box;
+}
+
+.app-shell--page-focus-stretch .question-test-page {
+  margin: 0 !important;
+  padding: 0 !important;
+  width: 100% !important;
+  max-width: none !important;
+  height: 100% !important;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.app-shell--page-focus-stretch .question-test-page .test-topbar {
+  margin-bottom: 0;
+  border-radius: 0;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  flex-shrink: 0;
+}
+
+.app-shell--page-focus-stretch .question-test-page .test-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
+  border-radius: 0;
+  overflow: hidden;
+}
+
+.app-shell--page-focus-stretch .question-test-page .test-running-with-nav {
+  min-height: 0;
+  height: 100%;
+}

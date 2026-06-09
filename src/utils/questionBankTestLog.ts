@@ -15,7 +15,13 @@ export type QuestionBankTestAnswerPayload = {
   unitIndex: number
   questionTitle: string
   /** 单题；session-summary=进入总结页归档；session-report=DeepSeek 雷达报告已生成 */
-  questionType: 'general' | 'choice' | 'mindmap-mcq' | 'session-summary' | 'session-report'
+  questionType:
+    | 'general'
+    | 'choice'
+    | 'mindmap-mcq'
+    | 'handout-judgment'
+    | 'session-summary'
+    | 'session-report'
   score: number
   maxScore: number
   resultDetail: string
@@ -135,9 +141,10 @@ export function buildQuizRadarResultLines(session: QuestionBankTestSession): str
 }
 
 export function questionBankTestTypeLabel(questionType: QuestionBankTestAnswerPayload['questionType']): string {
-  if (questionType === 'general') return '一般题型'
-  if (questionType === 'choice') return '选择题型'
-  if (questionType === 'mindmap-mcq') return '思维导图小题'
+  if (questionType === 'general') return '作答题'
+  if (questionType === 'choice') return '选择题'
+  if (questionType === 'mindmap-mcq') return '导图选择题'
+  if (questionType === 'handout-judgment') return '讲义判断题'
   if (questionType === 'session-summary') return '测验归档'
   return '测验报告'
 }

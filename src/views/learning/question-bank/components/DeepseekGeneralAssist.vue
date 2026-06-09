@@ -1,16 +1,23 @@
 <script setup lang="ts">
 import { ElMessage } from 'element-plus'
-import DOMPurify from 'dompurify'
-import { marked } from 'marked'
 import { computed, ref } from 'vue'
+import { markdownToSafeHtml } from '@/utils/markdownToHtml'
 import { htmlToPlainText } from '@/utils/htmlToText'
+import { useDeepseekConversation } from '@/composables/useDeepseekConversation'
 import {
+  buildChoiceMistakeAwareUserMessage,
+  buildGeneralMistakeAwareUserMessage,
+  buildQuestionSolveUserMessage,
+  choiceMistakeAwareSystem,
+  GENERAL_MISTAKE_AWARE_SYSTEM,
   isAiChatConfigured,
+  QUESTION_SOLVE_SYSTEM,
   requestChoiceMistakeAwareSolve,
   requestGeneralMistakeAwareSolve,
   requestQuestionSolve,
 } from '@/services/deepseek'
-import { hashForAiCache, rememberAiResponse } from '@/utils/aiResponseCache'
+import { hashForAiCache } from '@/utils/aiResponseCache'
+import DeepseekChatThread from './DeepseekChatThread.vue'
 
 const props = defineProps<{
   title: string
@@ -41,9 +48,38 @@ const emit = defineEmits<{
   (e: 'inject', html: string): void
 }>()
 
-const loading = ref(false)
-const answer = ref('')
-const error = ref('')
+const followupInput = ref('')
+
+const contextKey = computed(() =>
+  hashForAiCache(
+    JSON.stringify({
+      title: props.title,
+      analysisHtml: props.analysisHtml ?? '',
+      contentHtml: props.contentHtml ?? '',
+      choiceMode: props.choiceMode,
+      choiceCorrectAnswers: props.choiceCorrectAnswers,
+      choiceOptions: props.choiceOptions,
+      choiceStem: props.choiceStem,
+      mistakeAware: props.mistakeAware,
+      reflectiveUserAnswerHtml: props.reflectiveUserAnswerHtml,
+      choiceUserSelectedTexts: props.choiceUserSelectedTexts,
+      mistakePromptVersion: 'single-multi-v2',
+    }),
+  ),
+)
+
+const {
+  loading,
+  error,
+  hasStarted,
+  lastAssistantText,
+  displayTurns,
+  reset,
+  start,
+  followup,
+} = useDeepseekConversation({
+  resetKey: contextKey,
+})
 
 const hasAiProxy = computed(() => isAiChatConfigured())
 
@@ -96,78 +132,114 @@ const solveButtonLabel = computed(() =>
   props.mistakeAware ? 'DeepSeek 错因解析' : 'DeepSeek 解答',
 )
 
-const answerHtml = computed(() => {
-  const md = answer.value.trim()
-  if (!md) return ''
-  const raw = marked.parse(md, { async: false })
-  if (typeof raw !== 'string') return ''
-  return DOMPurify.sanitize(raw, { USE_PROFILES: { html: true } })
-})
+const firstAssistantTitle = computed(() =>
+  props.mistakeAware ? 'AI 错因与改进' : 'AI 解答',
+)
+
+const lastAnswerHtml = computed(() => markdownToSafeHtml(lastAssistantText.value))
+
+const canSubmitFollowup = computed(
+  () => hasAiProxy.value && followupInput.value.trim().length > 0 && !loading.value,
+)
+
+function buildInitialRequest(): {
+  initialUser: string
+  system: string
+  cacheKey: string
+  fetch: () => Promise<string>
+} {
+  const cachePayload = contextKey.value
+  if (isChoiceMistake.value) {
+    const mode = props.choiceMode ?? 'single'
+    const input = {
+      title: props.title,
+      stem: props.choiceStem,
+      mode,
+      options: props.choiceOptions ?? [],
+      correctAnswerTexts: [...(props.choiceCorrectAnswers ?? [])],
+      userSelectedTexts: [...(props.choiceUserSelectedTexts ?? [])],
+      analysisHtml: props.analysisHtml,
+    }
+    return {
+      initialUser: buildChoiceMistakeAwareUserMessage(input),
+      system: choiceMistakeAwareSystem(mode),
+      cacheKey: `assist:${cachePayload}`,
+      fetch: () => requestChoiceMistakeAwareSolve(input),
+    }
+  }
+  if (isGeneralMistake.value) {
+    const input = {
+      title: props.title,
+      contentHtml: props.contentHtml ?? '',
+      analysisHtml: props.analysisHtml,
+      userAnswerHtml: props.reflectiveUserAnswerHtml ?? '',
+    }
+    return {
+      initialUser: buildGeneralMistakeAwareUserMessage(input),
+      system: GENERAL_MISTAKE_AWARE_SYSTEM,
+      cacheKey: `assist:${cachePayload}`,
+      fetch: () => requestGeneralMistakeAwareSolve(input),
+    }
+  }
+  if (isChoiceAssist.value) {
+    const input = {
+      kind: 'choice' as const,
+      title: props.title,
+      mode: props.choiceMode!,
+      correctAnswers: [...props.choiceCorrectAnswers!],
+      analysisHtml: props.analysisHtml,
+    }
+    return {
+      initialUser: buildQuestionSolveUserMessage(input),
+      system: QUESTION_SOLVE_SYSTEM,
+      cacheKey: `assist:${cachePayload}`,
+      fetch: () => requestQuestionSolve(input),
+    }
+  }
+  const input = {
+    kind: 'general' as const,
+    title: props.title,
+    contentHtml: props.contentHtml ?? '',
+    analysisHtml: props.analysisHtml,
+  }
+  return {
+    initialUser: buildQuestionSolveUserMessage(input),
+    system: QUESTION_SOLVE_SYSTEM,
+    cacheKey: `assist:${cachePayload}`,
+    fetch: () => requestQuestionSolve(input),
+  }
+}
 
 const onSolve = async () => {
-  error.value = ''
-  loading.value = true
   try {
-    const cacheKey = `assist:${hashForAiCache(
-      JSON.stringify({
-        title: props.title,
-        analysisHtml: props.analysisHtml ?? '',
-        contentHtml: props.contentHtml ?? '',
-        choiceMode: props.choiceMode,
-        choiceCorrectAnswers: props.choiceCorrectAnswers,
-        choiceOptions: props.choiceOptions,
-        choiceStem: props.choiceStem,
-        mistakeAware: props.mistakeAware,
-        reflectiveUserAnswerHtml: props.reflectiveUserAnswerHtml,
-        choiceUserSelectedTexts: props.choiceUserSelectedTexts,
-      }),
-    )}`
-    answer.value = await rememberAiResponse(cacheKey, async () => {
-      if (isChoiceMistake.value) {
-        return requestChoiceMistakeAwareSolve({
-          title: props.title,
-          stem: props.choiceStem,
-          options: props.choiceOptions ?? [],
-          correctAnswerTexts: [...(props.choiceCorrectAnswers ?? [])],
-          userSelectedTexts: [...(props.choiceUserSelectedTexts ?? [])],
-          analysisHtml: props.analysisHtml,
-        })
-      }
-      if (isGeneralMistake.value) {
-        return requestGeneralMistakeAwareSolve({
-          title: props.title,
-          contentHtml: props.contentHtml ?? '',
-          analysisHtml: props.analysisHtml,
-          userAnswerHtml: props.reflectiveUserAnswerHtml ?? '',
-        })
-      }
-      if (isChoiceAssist.value) {
-        return requestQuestionSolve({
-          kind: 'choice',
-          title: props.title,
-          mode: props.choiceMode!,
-          correctAnswers: [...props.choiceCorrectAnswers!],
-          analysisHtml: props.analysisHtml,
-        })
-      }
-      return requestQuestionSolve({
-        kind: 'general',
-        title: props.title,
-        contentHtml: props.contentHtml ?? '',
-        analysisHtml: props.analysisHtml,
-      })
+    const req = buildInitialRequest()
+    await start({
+      ...req,
+      displayAssistantLabel: firstAssistantTitle.value,
     })
   } catch (e) {
-    const msg = e instanceof Error ? e.message : '请求失败'
-    error.value = msg
-    ElMessage.error(msg)
-  } finally {
-    loading.value = false
+    ElMessage.error(e instanceof Error ? e.message : '请求失败')
+  }
+}
+
+const onFollowup = async () => {
+  const text = followupInput.value.trim()
+  if (!text) return
+  try {
+    await followup(text, { assistant: '回答' })
+    followupInput.value = ''
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '请求失败')
   }
 }
 
 const injectAnswerHtml = () => {
-  if (answerHtml.value) emit('inject', answerHtml.value)
+  if (lastAnswerHtml.value) emit('inject', lastAnswerHtml.value)
+}
+
+const onReset = () => {
+  reset()
+  followupInput.value = ''
 }
 </script>
 
@@ -181,6 +253,7 @@ const injectAnswerHtml = () => {
       >
         <span class="deepseek-btn-wrap">
           <el-button
+            v-if="!hasStarted"
             type="primary"
             plain
             :loading="loading"
@@ -192,20 +265,51 @@ const injectAnswerHtml = () => {
         </span>
       </el-tooltip>
       <el-button
-        v-if="enableAnswerInject && answerHtml && !isChoiceAssist"
+        v-if="enableAnswerInject && lastAnswerHtml && !isChoiceAssist"
         type="success"
         plain
         @click="injectAnswerHtml"
       >
         填入作答区
       </el-button>
+      <el-button v-if="hasStarted" text type="info" :disabled="loading" @click="onReset">
+        重新开始
+      </el-button>
     </div>
+
+    <DeepseekChatThread
+      v-if="displayTurns.length"
+      :turns="displayTurns"
+      :first-assistant-title="firstAssistantTitle"
+    />
+
+    <div v-if="hasStarted" class="deepseek-followup">
+      <el-input
+        v-model="followupInput"
+        type="textarea"
+        :rows="3"
+        resize="none"
+        maxlength="500"
+        show-word-limit
+        placeholder="针对本题继续追问，例如：能再举个例子吗？这一步为什么不对？"
+        @keydown.ctrl.enter="onFollowup"
+      />
+      <div class="deepseek-followup-actions">
+        <el-tooltip
+          :disabled="hasAiProxy"
+          placement="top"
+          content="开发：server/.env 配置 DEEPSEEK_API_KEY 并运行 npm run dev:api；生产：VITE_AI_API_BASE。详见 docs/ENV-说明.md"
+        >
+          <span class="deepseek-btn-wrap">
+            <el-button type="primary" plain :loading="loading" :disabled="!canSubmitFollowup" @click="onFollowup">
+              继续追问
+            </el-button>
+          </span>
+        </el-tooltip>
+      </div>
+    </div>
+
     <p v-if="error" class="deepseek-error">{{ error }}</p>
-    <div v-if="answerHtml" class="deepseek-answer">
-      <h4 class="deepseek-answer-title">{{ mistakeAware ? 'AI 错因与改进' : 'AI 解答' }}</h4>
-      <!-- eslint-disable-next-line vue/no-v-html -->
-      <div class="deepseek-answer-body deepseek-md" v-html="answerHtml" />
-    </div>
   </div>
 </template>
 
@@ -227,32 +331,20 @@ const injectAnswerHtml = () => {
   display: inline-flex;
 }
 
+.deepseek-followup {
+  display: grid;
+  gap: 8px;
+}
+
+.deepseek-followup-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
 .deepseek-error {
   margin: 0;
   font-size: 13px;
   color: var(--app-danger, #dc2626);
-}
-
-.deepseek-answer {
-  border: 1px solid var(--app-border-soft);
-  border-radius: 10px;
-  padding: 12px 14px;
-  background: var(--app-surface-alt);
-}
-
-.deepseek-answer-title {
-  margin: 0 0 8px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--app-text-muted);
-}
-
-.deepseek-answer-body {
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.65;
-  word-break: break-word;
-  color: var(--app-text, inherit);
 }
 
 .deepseek-md :deep(h1),
@@ -265,21 +357,21 @@ const injectAnswerHtml = () => {
 }
 
 .deepseek-md :deep(h1) {
-  font-size: 1.35rem;
+  font-size: 1.35em;
   border-bottom: 1px solid var(--app-border-soft);
   padding-bottom: 0.35em;
 }
 
 .deepseek-md :deep(h2) {
-  font-size: 1.2rem;
+  font-size: 1.2em;
 }
 
 .deepseek-md :deep(h3) {
-  font-size: 1.05rem;
+  font-size: 1.05em;
 }
 
 .deepseek-md :deep(h4) {
-  font-size: 1rem;
+  font-size: 1em;
 }
 
 .deepseek-md :deep(p) {
@@ -314,13 +406,13 @@ const injectAnswerHtml = () => {
 
 .deepseek-md :deep(pre) {
   margin: 0.65em 0;
-  padding: 10px 12px;
+  padding: 0.65em 0.85em;
   border-radius: 8px;
   border: 1px solid var(--app-border-soft);
   background: var(--app-surface, #f8fafc);
   overflow-x: auto;
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: 1em;
+  line-height: 1.55;
 }
 
 .deepseek-md :deep(code) {
@@ -341,13 +433,15 @@ const injectAnswerHtml = () => {
   width: 100%;
   border-collapse: collapse;
   margin: 0.65em 0;
-  font-size: 13px;
+  font-size: 1em;
 }
 
 .deepseek-md :deep(th),
 .deepseek-md :deep(td) {
   border: 1px solid var(--app-border-soft);
-  padding: 6px 10px;
+  padding: 0.45em 0.65em;
+  font-size: inherit;
+  line-height: 1.5;
   text-align: left;
 }
 

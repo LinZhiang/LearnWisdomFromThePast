@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, unref } from 'vue'
-import type { QuestionBank } from '@/db/models'
+import type { QuestionBank, WrongQuestion } from '@/db/models'
 import {
   mindmapTestUnitToPayload,
   type QuestionFavoriteTarget,
@@ -31,6 +31,7 @@ const props = withDefaults(
     loading: boolean
     typeTextMap: Record<QuestionBank['type'], string>
     logMenuOrigin?: QuestionBankTestLogMenuOrigin
+    wrongBookRows?: WrongQuestion[]
   }>(),
   { testScopeAll: false, celebrateSessionPerfect: false, logMenuOrigin: 'learning-question-bank' },
 )
@@ -49,8 +50,12 @@ const favoriteTarget = computed<QuestionFavoriteTarget | null>(() => {
   if (!u) return null
   if (u.kind === 'general') return { mode: 'bank', question: u.question }
   if (u.kind === 'choice') return { mode: 'bank', question: u.question }
+  if (u.kind === 'handout-general') return null
   if (u.parent.id == null) return null
-  return { mode: 'derived-mcq', payload: mindmapTestUnitToPayload(u) }
+  if (u.kind === 'mindmap-mcq' || u.kind === 'handout-judgment') {
+    return { mode: 'derived-mcq', payload: mindmapTestUnitToPayload(u) }
+  }
+  return null
 })
 
 const totalScoreRounded = computed(() => Math.round(qb.totalScore * 100) / 100)
@@ -80,6 +85,12 @@ const summaryCorrectRateText = computed(() => {
 const currentMaxScore = computed(() =>
   qb.currentUnit ? qb.maxScoreForUnit(qb.currentUnit) : 0,
 )
+
+const currentMcqUnit = computed(() => {
+  const u = unref(qb.currentUnit)
+  if (!u || u.kind === 'general' || u.kind === 'handout-general') return null
+  return u
+})
 </script>
 
 <template>
@@ -87,7 +98,10 @@ const currentMaxScore = computed(() =>
     class="question-test-page"
     :class="{
       'is-fill-page-padding':
-        qb.phase === 'running' || qb.phase === 'building' || qb.phase === 'summary',
+        qb.phase === 'running' ||
+        qb.phase === 'building' ||
+        qb.phase === 'ready' ||
+        qb.phase === 'summary',
     }"
   >
     <QuestionBankTestTopbar
@@ -101,6 +115,9 @@ const currentMaxScore = computed(() =>
       :summary-total-max="summaryTotalMax"
       :running-elapsed-text="qb.quizRunningElapsedText"
       :summary-duration-text="qb.quizDurationSummaryText"
+      :wrong-book-mode="qb.isWrongBookQuiz"
+      :wrong-book-correct-count="qb.wrongBookCorrectCount"
+      :back-button-label="logMenuOrigin === 'wrong-book' ? '返回错题本' : '返回学习题库'"
       @back="qb.backToBank()"
     />
 
@@ -114,18 +131,36 @@ const currentMaxScore = computed(() =>
         <p class="test-muted">题库加载中…</p>
       </template>
       <template v-else-if="!qb.units.length && qb.phase === 'idle'">
-        <p class="test-muted">当前类型下暂无题目。</p>
+        <p class="test-muted">当前类型下暂无可测验的学习内容。</p>
       </template>
       <template v-else-if="qb.phase === 'building'">
         <p class="test-muted">{{ qb.buildStatus }}</p>
         <p v-if="!testBuildConfig" class="test-hint">
-          正在调用 DeepSeek 生成干扰项与思维导图小题（约 5～10 道，以加粗考点为主），请稍候。
+          正在调用 DeepSeek 生成测验题目，请稍候。
         </p>
+      </template>
+      <template v-else-if="qb.phase === 'ready'">
+        <div class="test-ready-panel">
+          <p class="test-ready-lead">题目已准备好</p>
+          <p class="test-ready-count">
+            本次共 <strong>{{ qb.units.length }}</strong> 道题
+          </p>
+          <p class="test-ready-hint">
+            {{
+              qb.isWrongBookQuiz
+                ? '错题变式题生成可能耗时较长，请先看一眼题量是否合适。确认无误后再开始，计时从点击「开始测验」起算。'
+                : '请确认题量后再开始作答，计时从点击「开始测验」起算，不会计入生成题目的等待时间。'
+            }}
+          </p>
+          <el-button type="primary" size="large" class="test-ready-start-btn" @click="qb.startQuiz">
+            开始测验
+          </el-button>
+        </div>
       </template>
       <template v-else-if="qb.phase === 'running' && qb.currentUnit">
         <div class="test-running-with-nav">
-          <aside class="quiz-nav-sidebar" aria-label="题目列表与作答情况">
-            <h4 class="quiz-nav-aside-title">题目</h4>
+          <aside class="quiz-nav-sidebar" aria-label="测验列表与作答情况">
+            <h4 class="quiz-nav-aside-title">测验列表</h4>
             <p class="quiz-nav-intro">
               进度 {{ qb.questionsAnsweredCount }} / {{ qb.units.length }} 道；全部提交后进入结果页。点击条目跳转。
             </p>
@@ -164,15 +199,20 @@ const currentMaxScore = computed(() =>
               <QuestionBankTestRunningScoreBanner
                 :total-score-rounded="totalScoreRounded"
                 :running-total-max="qb.runningTotalMax"
+                :wrong-book-mode="qb.isWrongBookQuiz"
+                :wrong-book-correct-count="qb.wrongBookCorrectCount"
+                :units-length="qb.units.length"
               />
             </div>
             <QuestionBankTestGeneralUnit
-              v-if="qb.currentUnit.kind === 'general'"
+              v-if="qb.currentGeneralQuestion"
               v-model:answer-html="qb.answerHtml"
               v-model:self-score="qb.selfScore"
-              :question="qb.currentUnit.question"
+              v-model:general-self-correct="qb.generalSelfCorrect"
+              :question="qb.currentGeneralQuestion"
               :general-submitted="qb.generalSubmitted"
               :general-mistake-aware="qb.generalMistakeAware"
+              :binary-self-grade="qb.isWrongBookQuiz"
               :max-score="qb.maxScoreForUnit(qb.currentUnit)"
               :current-index="qb.currentIndex"
               :learning-type-id="learningTypeId"
@@ -182,10 +222,10 @@ const currentMaxScore = computed(() =>
               @next-general="qb.nextAfterGeneral()"
             />
             <QuestionBankTestMcqUnit
-              v-else
+              v-else-if="currentMcqUnit"
               v-model:selected-single="qb.selectedSingle"
               v-model:selected-multi="qb.selectedMulti"
-              :unit="qb.currentUnit"
+              :unit="currentMcqUnit"
               :mcq-submitted="qb.mcqSubmitted"
               :current-options="qb.currentOptions"
               :current-mcq-mode="qb.currentMcqMode"
@@ -201,6 +241,7 @@ const currentMaxScore = computed(() =>
               :current-index="qb.currentIndex"
               :learning-type-id="learningTypeId"
               :favorite-target="favoriteTarget"
+              :hide-score-tag="qb.isWrongBookQuiz"
               @run-assist="qb.runMcqAssist()"
               @submit-mcq="qb.submitMcq()"
               @next-mcq="qb.nextAfterMcq()"
@@ -418,6 +459,51 @@ const currentMaxScore = computed(() =>
   margin: 8px 0 0;
   font-size: 13px;
   color: var(--app-text-muted);
+}
+
+.test-ready-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: min(42vh, 360px);
+  padding: 28px 20px;
+  border: 1px solid var(--app-border-soft);
+  border-radius: 12px;
+  background: var(--app-surface);
+  text-align: center;
+}
+
+.test-ready-lead {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--app-text);
+}
+
+.test-ready-count {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--app-text-muted);
+}
+
+.test-ready-count strong {
+  font-size: 1.35rem;
+  color: var(--app-text);
+}
+
+.test-ready-hint {
+  margin: 0;
+  max-width: 36rem;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--app-text-muted);
+}
+
+.test-ready-start-btn {
+  margin-top: 8px;
+  min-width: 10rem;
 }
 
 .test-radar-chart-error {

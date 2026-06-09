@@ -123,22 +123,22 @@ export const cardList = ref([{
     name: '1级普通卡',
     rank: 1,
     money: 1,
-    percent: 70,
+    percent: 67,
   }, {
     name: '2级普通卡',
     rank: 2,
     money: 5,
-    percent: 22,
+    percent: 21,
   }, {
     name: '3级豪华卡',
     rank: 3,
     money: 15,
-    percent: 6,
+    percent: 9,
   }, {
     name: '4级超级卡',
     rank: 4,
     money: 50,
-    percent: 2,
+    percent: 3,
   }, ]
 }, {
   kind: 'ladder' as CardTicketKind,
@@ -153,22 +153,22 @@ export const cardList = ref([{
     name: '1级普通卡',
     rank: 1,
     money: 1,
-    percent: 85,
+    percent: 75,
   }, {
     name: '2级普通卡',
     rank: 2,
     money: 5,
-    percent: 10,
+    percent: 17,
   }, {
     name: '3级豪华卡',
     rank: 3,
     money: 15,
-    percent: 4,
+    percent: 6.5,
   }, {
     name: '4级超级卡',
     rank: 4,
     money: 50,
-    percent: 1,
+    percent: 1.5
   }, ]
 }])
 

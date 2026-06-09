@@ -4,6 +4,42 @@ import {
   getMaxMaterialImages,
   richHtmlToPlainTextOnly,
 } from '@/utils/richMaterialImages'
+import {
+  AI_CALCULATION_EXPLANATION_RULES,
+  AI_DERIVED_GENERAL_FOCUS_RULES,
+  AI_DERIVED_JUDGMENT_FOCUS_RULES,
+  AI_DERIVED_MCQ_FOCUS_RULES,
+  AI_DERIVED_MCQ_FORMAT_RULES,
+  AI_DERIVED_MCQ_OPTION_CONSISTENCY_RULES,
+  AI_QUIZ_BATCH_DIVERSITY_RULES,
+  appendQuizAvoidanceToPrompt,
+  buildSupplementalQuizAvoidanceHint,
+  HANDOUT_AI_BODY_MAX,
+  prepareHandoutBodyForAi,
+  WRONG_BOOK_GENERAL_VARIANT_FLEXIBLE_HINT,
+  WRONG_BOOK_GENERAL_VARIANT_RULES,
+  WRONG_BOOK_GENERAL_VARIANT_STANDARD_HINT,
+  WRONG_BOOK_MCQ_VARIANT_FLEXIBLE_HINT,
+  WRONG_BOOK_MCQ_VARIANT_RULES,
+  WRONG_BOOK_MCQ_VARIANT_STANDARD_HINT,
+} from '@/utils/handoutAiMaterial'
+import { appendHandoutExamFocusQuizRules } from '@/utils/handoutExamFocus'
+import {
+  AI_CHINESE_CLOZE_FORMAT_RULES,
+  appendChineseClozeQuizRules,
+  isChineseClozeHandout,
+} from '@/utils/chineseClozeQuiz'
+import { appendPoliticalCurrentEventsQuizRules } from '@/utils/politicalCivicsQuiz'
+import { buildKeywordFollowupMaterial } from '@/utils/keywordFollowupMaterial'
+import {
+  areClozeOptionsAllDistinct,
+  areMcqOptionsAllDistinct,
+  dedupeMcqsByCorrectAnswer,
+  filterClozeDistractors,
+  filterConsistentMcqDistractors,
+  mcqOptionsAreUniformlyFormatted,
+  mcqOptionsHaveCategoryOutlier,
+} from '@/utils/mcqOptionFormat'
 import { MATERIAL_LECTURE_USER_GOAL, ocrImagesLocally } from '@/utils/localImageOcr'
 
 export type MindmapDerivedMcq = {
@@ -11,6 +47,45 @@ export type MindmapDerivedMcq = {
   mode: 'single' | 'multiple'
   correct: string[]
   distractors: string[]
+  /** 语文选词填空：四选一，选项可为「词1/词2」 */
+  layout?: 'standard' | 'cloze-four'
+}
+
+/** 校验并解析单道 AI 选择题 JSON 对象 */
+export function parseMindmapMcqObject(item: unknown): MindmapDerivedMcq | null {
+  if (!item || typeof item !== 'object') return null
+  const o = item as Record<string, unknown>
+  const stem = String(o.stem ?? '').trim()
+  const mode = o.mode === 'multiple' ? 'multiple' : 'single'
+  const correct = Array.isArray(o.correct)
+    ? o.correct.map((x) => String(x).trim()).filter(Boolean)
+    : []
+  const distractors = Array.isArray(o.distractors)
+    ? o.distractors.map((x) => String(x).trim()).filter(Boolean)
+    : []
+  if (!stem) return null
+  const layoutRaw = String(o.layout ?? '').trim()
+  const layout: MindmapDerivedMcq['layout'] =
+    layoutRaw === 'cloze-four' || o.clozeFour === true ? 'cloze-four' : 'standard'
+  const optionTotal = layout === 'cloze-four' ? 4 : 5
+  if (layout === 'cloze-four' && mode !== 'single') return null
+  if (mode === 'single' && correct.length !== 1) return null
+  if (mode === 'multiple' && correct.length < 2) return null
+  if (correct.length + distractors.length !== optionTotal) return null
+  const filteredDistractors =
+    layout === 'cloze-four'
+      ? filterClozeDistractors(distractors, correct)
+      : filterConsistentMcqDistractors(distractors, correct)
+  if (correct.length + filteredDistractors.length !== optionTotal) return null
+  if (layout === 'standard') {
+    if (!mcqOptionsAreUniformlyFormatted(correct, filteredDistractors)) return null
+    if (!areMcqOptionsAllDistinct(correct, filteredDistractors)) return null
+    if (mcqOptionsHaveCategoryOutlier(correct, filteredDistractors)) return null
+  } else {
+    if (!areClozeOptionsAllDistinct(correct, filteredDistractors)) return null
+  }
+  if (mcqStemLeaksAnswer(stem, correct)) return null
+  return { stem, mode, correct, distractors: filteredDistractors, layout }
 }
 
 function stripJsonFence(text: string): string {
@@ -19,6 +94,39 @@ function stripJsonFence(text: string): string {
     t = t.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '')
   }
   return t.trim()
+}
+
+const HANDOUT_QUIZ_TOP_UP_MAX_ROUNDS = 3
+const MINDMAP_MCQ_TARGET_MAX = 10
+
+function mergeParsedMcqs(
+  existing: MindmapDerivedMcq[],
+  parsed: unknown,
+  maxCount: number,
+): MindmapDerivedMcq[] {
+  const out = [...existing]
+  if (!Array.isArray(parsed)) return dedupeMcqsByCorrectAnswer(out).slice(0, maxCount)
+  for (const item of parsed) {
+    const mcq = parseMindmapMcqObject(item)
+    if (!mcq) continue
+    out.push(mcq)
+    if (out.length >= maxCount * 2) break
+  }
+  return dedupeMcqsByCorrectAnswer(out).slice(0, maxCount)
+}
+
+/** 讲义/材料出题：考情速览定制 + 政治常识时事情境（按需） */
+function withHandoutQuizContextRules(
+  baseUser: string,
+  title: string,
+  rawBody: string,
+  ...extraContext: string[]
+): string {
+  const contexts = [rawBody, ...extraContext].filter((t) => t.trim())
+  let user = appendHandoutExamFocusQuizRules(baseUser, rawBody)
+  const primaryBody = contexts[0] ?? ''
+  user = appendChineseClozeQuizRules(user, title, primaryBody, contexts)
+  return appendPoliticalCurrentEventsQuizRules(user, title, primaryBody, contexts)
 }
 
 /** 命题比对用：去空白、去 markdown 加粗与常见引号 */
@@ -65,13 +173,28 @@ function stripMindmapMarkdownFence(text: string): string {
 const MINDMAP_SOURCE_TEXT_MAX = 18_000
 const LECTURE_MATERIAL_MAX = 18_000
 
-/** 默认 Flash（测验辅助、干扰项等）；可通过 VITE_DEEPSEEK_MODEL_DEFAULT 覆盖 */
+/** 默认 Flash；可通过 VITE_DEEPSEEK_MODEL_DEFAULT 覆盖 */
 export const DEEPSEEK_MODEL_DEFAULT =
   import.meta.env.VITE_DEEPSEEK_MODEL_DEFAULT?.trim() || 'deepseek-v4-flash'
 
-/** 长文生成（思维导图、资料讲义）；可通过 VITE_DEEPSEEK_MODEL_HEAVY 覆盖 */
+/**
+ * 长文场景（思维导图、资料讲义）与 DEFAULT 同档，默认 Flash，避免 v4-pro 高额账单。
+ * 仅当 VITE_DEEPSEEK_ALLOW_PRO=true 且显式配置 HEAVY 为 pro 时才会请求 Pro。
+ */
 export const DEEPSEEK_MODEL_HEAVY =
-  import.meta.env.VITE_DEEPSEEK_MODEL_HEAVY?.trim() || 'deepseek-v4-pro'
+  import.meta.env.VITE_DEEPSEEK_MODEL_HEAVY?.trim() || DEEPSEEK_MODEL_DEFAULT
+
+const ALLOW_PRO_MODEL =
+  String(import.meta.env.VITE_DEEPSEEK_ALLOW_PRO ?? '').toLowerCase() === 'true'
+
+/** 本 App 出站模型：默认禁止 v4-pro（含误配的环境变量与旧前端包） */
+export function resolveChatModel(requested?: string): string {
+  const fallback = DEEPSEEK_MODEL_DEFAULT
+  const m = (requested ?? fallback).trim() || fallback
+  if (ALLOW_PRO_MODEL) return m
+  if (/v4-pro/i.test(m) || /^deepseek-reasoner$/i.test(m)) return fallback
+  return m
+}
 
 const WENGU_AI_SOURCE = 'wengu-learning-app'
 
@@ -80,9 +203,117 @@ type ChatMessage = {
   content: string
 }
 
-function parseAssistantContent(content: unknown): string {
+/** UI 多轮对话中的一轮（不含 system） */
+export type DeepSeekChatTurn = {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+const CONVERSATION_FOLLOWUP_SYSTEM_NOTE =
+  '当前为针对同一道题或同一学习材料的连续对话；请结合上文与首条消息中的题目/材料背景作答，使用简体中文，可用 Markdown。直接给出最终回答，不要输出思考过程、检索步骤或「正在分析」等中间说明。'
+
+/** 在已有对话历史上继续追问 */
+export async function deepseekChatConversation(input: {
+  system: string
+  history: DeepSeekChatTurn[]
+  userMessage: string
+  temperature?: number
+  maxTokens?: number
+}): Promise<string> {
+  const userMessage = input.userMessage.trim()
+  if (!userMessage) throw new Error('请输入追问内容')
+  if (input.history.length === 0) {
+    throw new Error('对话尚未开始，请先发起首次提问')
+  }
+
+  const system =
+    input.history.length > 0
+      ? `${input.system.trim()}\n\n${CONVERSATION_FOLLOWUP_SYSTEM_NOTE}`
+      : input.system.trim()
+
+  const messages: ChatMessage[] = [
+    { role: 'system', content: system },
+    ...input.history.map((t) => ({ role: t.role, content: t.content })),
+    { role: 'user', content: userMessage },
+  ]
+
+  return deepseekChatCompletion(messages, {
+    temperature: input.temperature ?? 0.4,
+    maxTokens: input.maxTokens,
+  })
+}
+
+type DeepSeekAssistantMessage = {
+  content?: unknown
+  reasoning_content?: unknown
+}
+
+/** OpenAI 兼容 content 字段：字符串或多段 text part */
+function normalizeMessageContentPart(content: unknown): string {
   if (typeof content === 'string') return content.trim()
-  return ''
+  if (!Array.isArray(content)) return ''
+  const parts = content
+    .map((part) => {
+      if (typeof part === 'string') return part
+      if (part && typeof part === 'object' && 'text' in part) {
+        return String((part as { text?: unknown }).text ?? '')
+      }
+      return ''
+    })
+    .map((s) => s.trim())
+    .filter(Boolean)
+  return parts.join('\n').trim()
+}
+
+/**
+ * deepseek-v4-flash 等模型会把部分 token 写入 reasoning_content；
+ * 当 max_tokens 偏紧时 message.content 可能为空，需从 reasoning 末尾提取最终答案/JSON。
+ */
+function extractAnswerFromReasoningFallback(reasoning: unknown): string {
+  if (typeof reasoning !== 'string') return ''
+  const t = reasoning.trim()
+  if (!t) return ''
+
+  const fenced = t.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  if (fenced?.[1]?.trim()) {
+    const inner = fenced[1].trim()
+    try {
+      JSON.parse(inner)
+      return inner
+    } catch {
+      /* continue */
+    }
+  }
+
+  const tail = t.slice(Math.max(0, t.length - 12_000))
+  const jsonTail = tail.match(/(\[[\s\S]*\]|\{[\s\S]*\})\s*$/)
+  if (jsonTail?.[1]) {
+    try {
+      JSON.parse(jsonTail[1])
+      return jsonTail[1].trim()
+    } catch {
+      /* continue */
+    }
+  }
+
+  const paragraphs = t.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean)
+  return paragraphs.length > 0 ? paragraphs[paragraphs.length - 1]! : t
+}
+
+function parseAssistantMessageText(message: DeepSeekAssistantMessage | undefined): string {
+  if (!message) return ''
+  const fromContent = normalizeMessageContentPart(message.content)
+  if (fromContent) return fromContent
+  return extractAnswerFromReasoningFallback(message.reasoning_content)
+}
+
+/** Flash / Reasoner 会额外消耗 reasoning token，为最终输出预留缓冲 */
+function adjustMaxTokensForReasoningModel(model: string, maxTokens?: number): number | undefined {
+  if (maxTokens == null || maxTokens <= 0) return maxTokens
+  if (/flash|reasoner/i.test(model)) {
+    return Math.min(8192, maxTokens + 768)
+  }
+  return maxTokens
 }
 
 /** 将代理/上游返回的错误体转成可读中文（避免直接展示整段 JSON） */
@@ -95,6 +326,12 @@ function formatDeepSeekFetchError(status: number, errText: string): string {
     upstreamMsg = errText.trim().slice(0, 200)
   }
 
+  if (
+    status === 400 &&
+    /maximum context length|requested.*tokens/i.test(upstreamMsg)
+  ) {
+    return '讲义或材料过长，已超过 DeepSeek 单次可处理上限。请缩短讲义正文、减少内嵌大图后保存，再重新测验；或降低自动出题数量。'
+  }
   if (status === 402 || /insufficient balance/i.test(upstreamMsg)) {
     return 'DeepSeek 账户余额不足（402）：请在 https://platform.deepseek.com 充值或更换有余额的 API Key，并更新 server/.env 中的 DEEPSEEK_API_KEY。'
   }
@@ -122,13 +359,15 @@ async function deepseekChatCompletion(
       '未配置 AI 代理地址：生产构建请设置 VITE_AI_API_BASE（见 docs/ENV-说明.md）',
     )
   }
+  const model = resolveChatModel(options?.model)
   const body: Record<string, unknown> = {
-    model: options?.model ?? DEEPSEEK_MODEL_DEFAULT,
+    model,
     messages,
     temperature: options?.temperature ?? 0.35,
   }
-  if (options?.maxTokens != null && options.maxTokens > 0) {
-    body.max_tokens = options.maxTokens
+  const maxTokens = adjustMaxTokensForReasoningModel(model, options?.maxTokens)
+  if (maxTokens != null && maxTokens > 0) {
+    body.max_tokens = maxTokens
   }
   const res = await fetch(url, {
     method: 'POST',
@@ -143,10 +382,24 @@ async function deepseekChatCompletion(
     throw new Error(formatDeepSeekFetchError(res.status, errText))
   }
   const data = (await res.json()) as {
-    choices?: Array<{ message?: { content?: unknown } }>
+    choices?: Array<{
+      finish_reason?: string
+      message?: DeepSeekAssistantMessage
+    }>
   }
-  const text = parseAssistantContent(data.choices?.[0]?.message?.content)
-  if (!text) throw new Error('DeepSeek 未返回有效内容')
+  const choice = data.choices?.[0]
+  const text = parseAssistantMessageText(choice?.message)
+  if (!text) {
+    const hasReasoning =
+      typeof choice?.message?.reasoning_content === 'string' &&
+      choice.message.reasoning_content.trim().length > 0
+    if (choice?.finish_reason === 'length' && hasReasoning) {
+      throw new Error(
+        'DeepSeek 回复被长度上限截断（思考过程占满 token）。请缩短讲义/材料或减少自动出题数量后重试。',
+      )
+    }
+    throw new Error('DeepSeek 未返回有效内容（模型未产出正文，请稍后重试）')
+  }
   return text
 }
 
@@ -200,7 +453,7 @@ ${body}`
   const text = await deepseekChatRaw(user, {
     system: `你是专业的课程讲义整理助手。用户要求：${MATERIAL_LECTURE_USER_GOAL}。你已收到从图片 OCR 得到的全文，请直接整理讲义并加粗重点，不要写教程或假设性示例。`,
     temperature: 0.35,
-    model: DEEPSEEK_MODEL_HEAVY,
+    model: resolveChatModel(DEEPSEEK_MODEL_HEAVY),
   })
   const md = stripMindmapMarkdownFence(text)
   if (!md) throw new Error('DeepSeek 未返回有效的讲义内容')
@@ -329,7 +582,7 @@ ${body}`
     system:
       '你是思维导图助教。###下用≤4个####归类（时代背景/会议概况/任务与方略/组织与影响），禁止9条平铺；每分支≤40字；通俗子项；**加粗**；例不加粗。',
     temperature: 0.38,
-    model: DEEPSEEK_MODEL_HEAVY,
+    model: resolveChatModel(DEEPSEEK_MODEL_HEAVY),
   })
   const md = stripMindmapMarkdownFence(text)
   if (!md) throw new Error('DeepSeek 未返回有效的导图 Markdown')
@@ -368,17 +621,40 @@ async function deepseekChatRaw(
     {
       temperature: options?.temperature,
       maxTokens: options?.maxTokens,
-      model: options?.model ?? DEEPSEEK_MODEL_DEFAULT,
+      model: resolveChatModel(options?.model),
     },
   )
 }
 
-const KEYWORD_FOLLOWUP_MATERIAL_MAX = 14_000
+const KEYWORD_FOLLOWUP_MATERIAL_MAX = 20_000
 
 function truncatePlainText(text: string, maxLen: number): string {
   const t = text.trim()
   if (t.length <= maxLen) return t
   return `${t.slice(0, maxLen)}\n\n…（后文已省略）`
+}
+
+export const KEYWORD_FOLLOWUP_SYSTEM =
+  '你是专业、耐心的学习助手，使用简体中文。作答必须以【题目相关材料】为依据；材料可能被节选，但不得轻易否认材料中已出现的术语或段落。直接输出给学员看的最终回答，不要复述命题说明、不要描述检索或思考过程。'
+
+/** 题库详情「关键字追问」首条 user 消息（含材料与追问） */
+export function buildKeywordFollowupUserMessage(input: {
+  typeLabel: string
+  title: string
+  materialPlainText: string
+  userKeywords: string
+}): string {
+  const kw = input.userKeywords.trim()
+  if (!kw) throw new Error('请输入关键字或追问内容')
+
+  const material = buildKeywordFollowupMaterial(
+    input.materialPlainText,
+    kw,
+    KEYWORD_FOLLOWUP_MATERIAL_MAX,
+  )
+  const title = input.title.trim() || '（无）'
+
+  return `你正在辅助学员学习。下面是一道题库中的题目（材料摘录；过长时含文首与「相关片段」，片段即材料原文节选）以及题型说明。\n学员给出了「关键字 / 追问」，请你**紧扣该关注点**作答（可使用 Markdown）：\n1）先在【题目相关材料】中查找与追问相关的表述并引用说明，再展开通俗解释；\n2）**禁止**在未仔细检索材料的情况下断言「材料未出现」「讲义中没有」某词或某概念——若相关片段或文首中已出现，必须基于材料作答；\n3）仅当材料确实没有任何相关内容时，才可说明不足并补充通用学习建议。\n4）**直接输出最终回答**，不要复述本说明、不要写思考过程或「正在检索材料」等中间步骤。\n\n【题型】${input.typeLabel}\n【题目名称】${title}\n\n【题目相关材料】\n${material || '（暂无正文摘录）'}\n\n【学员关键字或追问】\n${kw}`
 }
 
 /**
@@ -390,16 +666,9 @@ export async function requestQuestionKeywordFollowup(input: {
   materialPlainText: string
   userKeywords: string
 }): Promise<string> {
-  const kw = input.userKeywords.trim()
-  if (!kw) throw new Error('请输入关键字或追问内容')
-
-  const material = truncatePlainText(input.materialPlainText, KEYWORD_FOLLOWUP_MATERIAL_MAX)
-  const title = input.title.trim() || '（无）'
-
-  const user = `你正在辅助学员学习。下面是一道题库中的题目（纯文本摘录）以及题型说明。\n学员给出了「关键字 / 追问」，请你**紧扣该关注点**作答（可使用 Markdown）：先点明与题目材料的关联，再展开说明；若材料不足以支撑结论，请如实说明并给出可操作的补充学习建议。\n\n【题型】${input.typeLabel}\n【题目名称】${title}\n\n【题目相关材料】\n${material || '（暂无正文摘录）'}\n\n【学员关键字或追问】\n${kw}`
-
+  const user = buildKeywordFollowupUserMessage(input)
   return deepseekChatRaw(user, {
-    system: '你是专业、耐心的学习助手，使用简体中文，条理清楚，避免空泛套话。',
+    system: KEYWORD_FOLLOWUP_SYSTEM,
     temperature: 0.4,
   })
 }
@@ -425,7 +694,10 @@ export type QuestionSolveInput =
       analysisHtml?: string
     }
 
-function buildUserMessage(input: QuestionSolveInput): string {
+export const QUESTION_SOLVE_SYSTEM =
+  `你是专业、耐心的学习助手，解答需准确、条理清楚，使用简体中文。直接给出最终解答，不要输出思考过程或中间分析步骤。\n\n${AI_CALCULATION_EXPLANATION_RULES}`
+
+export function buildQuestionSolveUserMessage(input: QuestionSolveInput): string {
   const analysisText = input.analysisHtml ? htmlToPlainText(input.analysisHtml) : ''
 
   if (input.kind === 'general') {
@@ -473,10 +745,10 @@ export async function requestQuestionSolve(input: QuestionSolveInput): Promise<s
     }
   }
 
-  const user = buildUserMessage(input)
+  const user = buildQuestionSolveUserMessage(input)
 
   return deepseekChatRaw(user, {
-    system: '你是专业、耐心的学习助手，解答需准确、条理清楚，使用简体中文。',
+    system: QUESTION_SOLVE_SYSTEM,
     temperature: 0.4,
   })
 }
@@ -505,14 +777,15 @@ export async function requestChoiceDistractors(input: {
   const correct = input.correctAnswers.map((s) => s.trim()).filter(Boolean)
   const analysisText = input.analysisHtml ? htmlToPlainText(input.analysisHtml) : ''
   const correctBlock = correct.map((a, i) => `${i + 1}. ${a}`).join('\n')
-  let user = `你是命题助手。下面是一道选择题的已知**正确选项**（这些文本必须原样保留在题目中，不要改写）。\n请再生成恰好 ${need} 个**错误选项**文本：表述风格与正确项接近、容易混淆，但结论或事实明显错误；不要与正确选项重复或同义；每条一行意群，不要编号。\n\n题目名称：${input.title.trim() || '（无）'}\n\n正确选项：\n${correctBlock}`
+  let user = `你是命题助手。下面是一道选择题的已知**正确选项**（这些文本必须原样保留在题目中，不要改写）。\n请再生成恰好 ${need} 个**错误选项**文本：与正确项**同一答案形态**（同样长短、同样体例，如都是十六进制码则干扰项也全是十六进制码），容易混淆但结论错误；不要与正确选项重复或同义；每条一行意群，不要编号。\n\n${AI_DERIVED_MCQ_OPTION_CONSISTENCY_RULES}\n\n题目名称：${input.title.trim() || '（无）'}\n\n正确选项：\n${correctBlock}`
   if (analysisText) {
     user += `\n\n题目解析（供你把握考点，不要照抄到选项里）：\n${analysisText}`
   }
   user += `\n\n仅返回 JSON 数组，共 ${need} 个字符串，例如：["干扰项1","干扰项2",...]。不要其它说明。`
 
   const raw = await deepseekChatRaw(user, {
-    system: '只输出合法 JSON 数组字符串，元素为简体中文，不要 markdown 代码块。',
+    system:
+      `只输出合法 JSON 数组字符串，元素为简体中文，不要 markdown 代码块。干扰项必须与正确选项同一答案形态、同一分类层级，彼此紧密可混淆，禁止算式推导。\n\n${AI_DERIVED_MCQ_OPTION_CONSISTENCY_RULES}`,
     temperature: 0.55,
   })
   let parsed: unknown
@@ -523,18 +796,7 @@ export async function requestChoiceDistractors(input: {
   }
   if (!Array.isArray(parsed)) throw new Error('干扰项格式应为 JSON 数组')
   const out = parsed.map((x) => String(x).trim()).filter(Boolean)
-  const norm = (s: string) => s.replace(/\s+/g, '')
-  const correctSet = new Set(correct.map(norm))
-  const dedup: string[] = []
-  const seen = new Set<string>()
-  for (const s of out) {
-    const n = norm(s)
-    if (correctSet.has(n)) continue
-    if (seen.has(n)) continue
-    seen.add(n)
-    dedup.push(s)
-    if (dedup.length >= need) break
-  }
+  const dedup = filterConsistentMcqDistractors(out, correct)
   while (dedup.length < need) {
     dedup.push(`（干扰项 ${dedup.length + 1}）请重新生成测验`)
   }
@@ -545,48 +807,447 @@ export async function requestChoiceDistractors(input: {
 export async function requestMindmapDerivedMcqs(input: {
   title: string
   markdown: string
+  /** 近几场题面参考，适当多样化（学习题库测验传入，非硬性禁考） */
+  quizAvoidanceHint?: string
 }): Promise<MindmapDerivedMcq[]> {
-  const md = (input.markdown ?? '').trim()
+  const md = prepareHandoutBodyForAi(input.markdown ?? '', MINDMAP_SOURCE_TEXT_MAX)
   if (!md) throw new Error('思维导图内容为空')
-  const user = `下面是一则思维导图草稿（Markdown）。其中 **加粗** 的文字是核心考点。\n\n请你根据全文**丰富程度**生成 **5～10 道** 测验用选择题：加粗要点多、层次丰富时尽量出满 **10 道**；内容较简略时不少于 **5 道**，并优先覆盖所有重要加粗要点。\n\n**出题比例（必须遵守）**：\n- **至少约 80%** 的题目要**主要考查加粗文字**对应的概念、结论或关系（正确选项的判据应能对应到这些加粗要点）。\n- **至多约 20%** 的题目可考查**非加粗**但结合上下文仍需理解的内容（如结构、层级、衔接），且必须**严格依据原文**，不得编造文中没有的信息。\n\n**关于“举例/案例”内容的命题约束（必须遵守）**：\n- 如果原文里出现“例如、举例、案例、样例、情景”等示例内容，**不要把示例原文直接当题干或正确选项**。\n- 可以把示例作为启发，改写为新的情境或换一个同类例子，题目要回到**考点本身**（概念、原理、关系、判据）而不是记忆某个示例句子。\n- 禁止仅做表面替换（改几个词仍是同一例子）；应做到“同考点、非原例、可迁移”。\n\n**防泄题（必须遵守）**：\n- 题干 stem 中**不得**出现 correct 数组里任一正确选项的原文、加粗考点的完整复述，或与正确项高度重合的短语。\n- 若题目问「某概括/评价/定位对应什么」，题干只写背景与提问指向，**不要把答案短语写进题干**。\n- 错误示例：题干写「被概括为"立党之本、执政之基、力量之源"……对应什么地位？」，而
-选项却是「立党之本、执政之基、力量之源」——题干已泄题。\n- 正确示例：题干写「"三个代表"重要思想在党史上的地位，常被概括为下列哪一表述？」——各表述放在选项中供辨析。\n\n**格式要求**：\n- 每道题 5 个选项：correct 为所有正确选项文本数组，distractors 为所有错误选项文本数组；|correct|+|distractors| 必须等于 5。\n- mode 为 single 时 correct 长度必须为 1，distractors 长度 4；mode 为 multiple 时 correct 长度至少 2，distractors 长度 = 5 - |correct|。\n- 题干 stem 不要直接照抄加粗原句、示例原句；不得泄露任何正确选项原文。\n- 使用简体中文。\n\n思维导图标题：${input.title.trim() || '（无）'}\n\n---\n${md}\n---\n\n仅返回 JSON 数组（长度在 5～10 之间），元素字段：stem, mode, correct, distractors。不要 markdown 代码块或其它说明。`
+
+  const systemPrompt = `只输出合法 JSON 数组。不要 markdown 围栏。约八成题考加粗重点。题干不得泄题；干扰项须与正确项同级、紧密可混淆。\n\n${AI_DERIVED_MCQ_OPTION_CONSISTENCY_RULES}`
+
+  const fetchBatch = async (batchCount: number, avoidance?: string): Promise<unknown> => {
+    const batchUser = withHandoutQuizContextRules(
+      appendQuizAvoidanceToPrompt(
+        `下面是一则思维导图草稿（Markdown 节选，**加粗** 为核心考点）。\n\n请你根据节选**丰富程度**生成 **恰好 ${batchCount} 道** 测验用选择题。\n\n${AI_QUIZ_BATCH_DIVERSITY_RULES}\n\n${AI_DERIVED_MCQ_FOCUS_RULES}\n\n${AI_DERIVED_MCQ_FORMAT_RULES}\n\n思维导图标题：${input.title.trim() || '（无）'}\n\n---\n${md}\n---\n\n仅返回 JSON 数组（长度必须为 ${batchCount}），字段：stem, mode, correct, distractors。不要 markdown 代码块或其它说明。`,
+        avoidance,
+      ),
+      input.title,
+      input.markdown ?? '',
+    )
+    const raw = await deepseekChatRaw(batchUser, {
+      system: systemPrompt.replace('长度 5～10', `长度 ${batchCount}`),
+      temperature: 0.45,
+      maxTokens: Math.min(4500, 500 + batchCount * 420),
+    })
+    try {
+      return JSON.parse(stripJsonFence(raw))
+    } catch {
+      throw new Error('DeepSeek 返回的思维导图小题不是合法 JSON')
+    }
+  }
+
+  let out: MindmapDerivedMcq[] = []
+  const avoidance = input.quizAvoidanceHint
+  for (let round = 0; round < HANDOUT_QUIZ_TOP_UP_MAX_ROUNDS; round++) {
+    if (out.length >= MINDMAP_MCQ_TARGET_MAX) break
+    const need = out.length === 0 ? MINDMAP_MCQ_TARGET_MAX : MINDMAP_MCQ_TARGET_MAX - out.length
+    const parsed = await fetchBatch(
+      need,
+      round === 0 ? avoidance : buildSupplementalQuizAvoidanceHint(avoidance, out.map((m) => m.stem), '选择题'),
+    )
+    const before = out.length
+    out = mergeParsedMcqs(out, parsed, MINDMAP_MCQ_TARGET_MAX)
+    if (out.length <= before) break
+  }
+  if (out.length === 0) throw new Error('思维导图小题未能通过校验')
+  return out
+}
+
+/** 讲义 Markdown 正文 → 指定数量的选择题 */
+export async function requestHandoutDerivedMcqs(input: {
+  title: string
+  bodyText: string
+  questionCount: number
+  quizAvoidanceHint?: string
+}): Promise<MindmapDerivedMcq[]> {
+  const body = prepareHandoutBodyForAi(input.bodyText ?? '', HANDOUT_AI_BODY_MAX)
+  if (!body) throw new Error('讲义内容为空')
+  const count = Math.min(20, Math.max(1, Math.floor(input.questionCount) || 8))
+  const clozeHandout = isChineseClozeHandout(input.title, input.bodyText ?? '')
+  const formatRules = clozeHandout ? AI_CHINESE_CLOZE_FORMAT_RULES : AI_DERIVED_MCQ_FORMAT_RULES
+  const quizTypeLabel = clozeHandout ? '选词填空（逻辑填空）' : '选择题'
+  const system = clozeHandout
+    ? `只输出合法 JSON 数组。语文选词填空：每题 layout 为 cloze-four，共 4 个选项。不要 markdown 围栏。`
+    : `只输出合法 JSON 数组。约八成题考加粗重点，勿考图片。不要 markdown 围栏。干扰项须同级、紧密可混淆。\n\n${AI_DERIVED_MCQ_OPTION_CONSISTENCY_RULES}`
+
+  const fetchBatch = async (batchCount: number, avoidance?: string): Promise<unknown> => {
+    const user = withHandoutQuizContextRules(
+      appendQuizAvoidanceToPrompt(
+        `下面是一则学习讲义正文（Markdown **节选**，已剔除全部图片，仅保留文字）。\n\n请生成 **恰好 ${batchCount} 道** 测验用${quizTypeLabel}。\n\n${AI_QUIZ_BATCH_DIVERSITY_RULES}\n\n${AI_DERIVED_MCQ_FOCUS_RULES}\n\n${formatRules}\n\n讲义名称：${input.title.trim() || '（无）'}\n\n---\n${body}\n---\n\n仅返回 JSON 数组（长度必须为 ${batchCount}），不要 markdown 代码块或其它说明。`,
+        avoidance,
+      ),
+      input.title,
+      input.bodyText ?? '',
+    )
+    const raw = await deepseekChatRaw(user, {
+      system: `${system}\n数组长度必须为 ${batchCount}。`,
+      temperature: 0.45,
+      maxTokens: Math.min(5000, 400 + batchCount * 450),
+    })
+    try {
+      return JSON.parse(stripJsonFence(raw))
+    } catch {
+      throw new Error('DeepSeek 返回的讲义小题不是合法 JSON')
+    }
+  }
+
+  let out: MindmapDerivedMcq[] = []
+  const avoidance = input.quizAvoidanceHint
+  for (let round = 0; round < HANDOUT_QUIZ_TOP_UP_MAX_ROUNDS; round++) {
+    if (out.length >= count) break
+    const need = count - out.length
+    const parsed = await fetchBatch(
+      need,
+      round === 0 ? avoidance : buildSupplementalQuizAvoidanceHint(avoidance, out.map((m) => m.stem), '选择题'),
+    )
+    const before = out.length
+    out = mergeParsedMcqs(out, parsed, count)
+    if (out.length <= before) break
+  }
+  if (out.length === 0) throw new Error('讲义小题未能通过校验')
+  return out
+}
+
+export type HandoutDerivedGeneral = {
+  stem: string
+  referenceAnswer: string
+  analysis: string
+  knowledgePoint: string
+}
+
+/** 讲义 Markdown → 指定数量的一般题型（侧重计算/运算变式，定位考点） */
+export async function requestHandoutDerivedGeneralQuestions(input: {
+  title: string
+  bodyText: string
+  questionCount: number
+  quizAvoidanceHint?: string
+}): Promise<HandoutDerivedGeneral[]> {
+  const body = prepareHandoutBodyForAi(input.bodyText ?? '', HANDOUT_AI_BODY_MAX)
+  if (!body) throw new Error('讲义内容为空')
+  const count = Math.min(20, Math.max(1, Math.floor(input.questionCount) || 5))
+  const system = `只输出合法 JSON 数组。重难点优先，勿考图片；计算题须换数变式。\n\n${AI_CALCULATION_EXPLANATION_RULES}`
+
+  const fetchBatch = async (batchCount: number, avoidance?: string): Promise<unknown> => {
+    const user = withHandoutQuizContextRules(
+      appendQuizAvoidanceToPrompt(
+        `下面是一则学习讲义正文（Markdown **节选**，已剔除全部图片）。\n\n请生成 **恰好 ${batchCount} 道** 测验用**一般题型**（非选择题），侧重可计算/可推导考点。\n\n${AI_DERIVED_GENERAL_FOCUS_RULES}\n\n**字段**：stem（题干）、referenceAnswer（参考答案）、analysis（解析）、knowledgePoint（4～12 字考点标签）。使用简体中文。\n\n讲义名称：${input.title.trim() || '（无）'}\n\n---\n${body}\n---\n\n仅返回 JSON 数组（长度必须为 ${batchCount}），不要 markdown 代码块或其它说明。`,
+        avoidance,
+      ),
+      input.title,
+      input.bodyText ?? '',
+    )
+    const raw = await deepseekChatRaw(user, {
+      system: `${system}\n数组长度必须为 ${batchCount}。`,
+      temperature: 0.5,
+      maxTokens: Math.min(5500, 600 + batchCount * 580),
+    })
+    try {
+      return JSON.parse(stripJsonFence(raw))
+    } catch {
+      throw new Error('DeepSeek 返回的讲义一般题不是合法 JSON')
+    }
+  }
+
+  let out: HandoutDerivedGeneral[] = []
+  const avoidance = input.quizAvoidanceHint
+  for (let round = 0; round < HANDOUT_QUIZ_TOP_UP_MAX_ROUNDS; round++) {
+    if (out.length >= count) break
+    const need = count - out.length
+    const parsed = await fetchBatch(
+      need,
+      round === 0 ? avoidance : buildSupplementalQuizAvoidanceHint(avoidance, out.map((g) => g.stem), '作答题'),
+    )
+    const before = out.length
+    out = mergeParsedGeneralQuestions(out, parsed, count)
+    if (out.length <= before) break
+  }
+  if (out.length === 0) throw new Error('讲义一般题未能通过校验')
+  return out
+}
+
+export type HandoutDerivedJudgment = {
+  stem: string
+  answer: boolean
+  analysis: string
+  knowledgePoint: string
+}
+
+function parseHandoutJudgmentObject(item: unknown): HandoutDerivedJudgment | null {
+  if (!item || typeof item !== 'object') return null
+  const o = item as Record<string, unknown>
+  const stem = String(o.stem ?? '').trim()
+  const analysis = String(o.analysis ?? '').trim()
+  const knowledgePoint = String(o.knowledgePoint ?? '').trim() || '考点'
+  let answer: boolean | null = null
+  if (typeof o.answer === 'boolean') answer = o.answer
+  else if (o.answer === 'true' || o.answer === '正确') answer = true
+  else if (o.answer === 'false' || o.answer === '错误') answer = false
+  if (!stem || answer === null) return null
+  return { stem, answer, analysis: analysis || stem, knowledgePoint }
+}
+
+function mergeParsedGeneralQuestions(
+  existing: HandoutDerivedGeneral[],
+  parsed: unknown,
+  maxCount: number,
+): HandoutDerivedGeneral[] {
+  const out = [...existing]
+  if (!Array.isArray(parsed)) return out.slice(0, maxCount)
+  const seen = new Set(out.map((g) => g.stem.replace(/\s+/g, ' ').trim()))
+  for (const item of parsed) {
+    if (!item || typeof item !== 'object') continue
+    const o = item as Record<string, unknown>
+    const stem = String(o.stem ?? '').trim()
+    const referenceAnswer = String(o.referenceAnswer ?? '').trim()
+    const analysis = String(o.analysis ?? '').trim()
+    const knowledgePoint = String(o.knowledgePoint ?? '').trim() || '考点'
+    if (!stem || !referenceAnswer) continue
+    const key = stem.replace(/\s+/g, ' ').trim()
+    if (key && seen.has(key)) continue
+    out.push({ stem, referenceAnswer, analysis: analysis || referenceAnswer, knowledgePoint })
+    if (key) seen.add(key)
+    if (out.length >= maxCount) break
+  }
+  return out.slice(0, maxCount)
+}
+
+function mergeParsedJudgments(
+  existing: HandoutDerivedJudgment[],
+  parsed: unknown,
+  maxCount: number,
+): HandoutDerivedJudgment[] {
+  const out = [...existing]
+  if (!Array.isArray(parsed)) return out.slice(0, maxCount)
+  const seen = new Set(out.map((j) => j.stem.replace(/\s+/g, ' ').trim()))
+  for (const item of parsed) {
+    const row = parseHandoutJudgmentObject(item)
+    if (!row) continue
+    const key = row.stem.replace(/\s+/g, ' ').trim()
+    if (key && seen.has(key)) continue
+    out.push(row)
+    if (key) seen.add(key)
+    if (out.length >= maxCount) break
+  }
+  return out.slice(0, maxCount)
+}
+
+/** 讲义 Markdown → 指定数量的判断题（易混淆对错陈述） */
+export async function requestHandoutDerivedJudgmentQuestions(input: {
+  title: string
+  bodyText: string
+  questionCount: number
+  quizAvoidanceHint?: string
+}): Promise<HandoutDerivedJudgment[]> {
+  const body = prepareHandoutBodyForAi(input.bodyText ?? '', HANDOUT_AI_BODY_MAX)
+  if (!body) throw new Error('讲义内容为空')
+  const count = Math.min(20, Math.max(1, Math.floor(input.questionCount) || 5))
+  const system =
+    '只输出合法 JSON 数组。约半数 answer 为 true、半数为 false；错误陈述须易混淆。不要 markdown 围栏。'
+
+  const fetchBatch = async (batchCount: number, avoidance?: string): Promise<unknown> => {
+    const user = withHandoutQuizContextRules(
+      appendQuizAvoidanceToPrompt(
+        `下面是一则学习讲义正文（Markdown **节选**，已剔除全部图片）。\n\n请生成 **恰好 ${batchCount} 道** 测验用**判断题**。\n\n${AI_DERIVED_JUDGMENT_FOCUS_RULES}\n\n${AI_QUIZ_BATCH_DIVERSITY_RULES}\n\n**字段**：stem（判断陈述）、answer（布尔：true=陈述正确，false=陈述错误）、analysis（解析）、knowledgePoint（4～12 字考点标签）。使用简体中文。\n\n讲义名称：${input.title.trim() || '（无）'}\n\n---\n${body}\n---\n\n仅返回 JSON 数组（长度必须为 ${batchCount}），不要 markdown 代码块或其它说明。`,
+        avoidance,
+      ),
+      input.title,
+      input.bodyText ?? '',
+    )
+    const raw = await deepseekChatRaw(user, {
+      system: `${system}\n数组长度必须为 ${batchCount}。`,
+      temperature: 0.48,
+      maxTokens: Math.min(5000, 500 + batchCount * 400),
+    })
+    try {
+      return JSON.parse(stripJsonFence(raw))
+    } catch {
+      throw new Error('DeepSeek 返回的讲义判断题不是合法 JSON')
+    }
+  }
+
+  let out: HandoutDerivedJudgment[] = []
+  const avoidance = input.quizAvoidanceHint
+  for (let round = 0; round < HANDOUT_QUIZ_TOP_UP_MAX_ROUNDS; round++) {
+    if (out.length >= count) break
+    const need = count - out.length
+    const parsed = await fetchBatch(
+      need,
+      round === 0 ? avoidance : buildSupplementalQuizAvoidanceHint(avoidance, out.map((j) => j.stem), '判断题'),
+    )
+    const before = out.length
+    out = mergeParsedJudgments(out, parsed, count)
+    if (out.length <= before) break
+  }
+  if (out.length === 0) throw new Error('讲义判断题未能通过校验')
+  return out
+}
+
+function formatMcqAnswerList(items: string[]): string {
+  return items.map((a, i) => `${i + 1}. ${a}`).join('\n')
+}
+
+/** 错题本：基于原导图/讲义小题或选择题快照，生成一道同考点变式选择题 */
+export async function requestWrongBookMcqVariant(input: {
+  anchorTitle: string
+  originalStem: string
+  originalCorrect: string[]
+  originalOptions?: string[]
+  mode: 'single' | 'multiple'
+  materialPlain?: string
+  /** 半数以上场次仍以原标准答案为 correct；其余可同考点下调整正确项 */
+  preferStandardAnswer?: boolean
+}): Promise<MindmapDerivedMcq> {
+  const stem = input.originalStem.trim()
+  const correct = input.originalCorrect.map((s) => s.trim()).filter(Boolean)
+  const material = (input.materialPlain ?? '').trim()
+  if (!stem) throw new Error('原错题题干为空，无法生成变式选择题')
+  if (correct.length === 0 && !material) {
+    throw new Error('原错题信息不足，无法生成变式选择题')
+  }
+  const opts = (input.originalOptions ?? []).map((s) => s.trim()).filter(Boolean)
+  const optsBlock =
+    opts.length > 0 ? opts.map((a, i) => `${String.fromCharCode(65 + i)}. ${a}`).join('\n') : '（无）'
+  const answerHint =
+    input.preferStandardAnswer !== false
+      ? WRONG_BOOK_MCQ_VARIANT_STANDARD_HINT
+      : WRONG_BOOK_MCQ_VARIANT_FLEXIBLE_HINT
+  let user = `下面是一道学员错题本中的选择题（或导图/讲义衍生小题）。请生成 **1 道** 测验用**变式选择题**，考查点不变。\n\n${WRONG_BOOK_MCQ_VARIANT_RULES}\n\n${answerHint}\n\n${AI_DERIVED_MCQ_FORMAT_RULES}\n\n【条目名称】${input.anchorTitle.trim() || '（无）'}\n【原题干】\n${stem}\n【原题型】${input.mode === 'multiple' ? '多选' : '单选'}`
+  if (correct.length > 0) {
+    user += `\n【原题标准答案（参考，不必逐字照抄为 correct）】\n${formatMcqAnswerList(correct)}`
+  } else {
+    user += `\n【说明】原错题无完整选项快照，请主要依据下方学习材料与题干考点出题。`
+  }
+  user += `\n【原全部选项（含干扰项）】\n${optsBlock}`
+  if (material) {
+    user += `\n\n【关联学习材料节选（命题须依据此材料，勿编造）】\n---\n${truncatePlainText(material, MINDMAP_SOURCE_TEXT_MAX)}\n---`
+  }
+  user += `\n\n仅返回 **一个** JSON 对象（不是数组），字段：stem, mode, correct, distractors。不要 markdown 代码块或其它说明。`
+  user = withHandoutQuizContextRules(
+    user,
+    input.anchorTitle,
+    material,
+    stem,
+  )
 
   const raw = await deepseekChatRaw(user, {
     system:
-      '只输出合法 JSON 数组，长度 5～10。不要输出 markdown 围栏。加粗相关题目须占绝大多数。题干不得包含正确选项原文或泄题短语。',
-    temperature: 0.45,
+      '只输出合法 JSON 对象。不要 markdown 围栏。约八成题考材料中的加粗重点（若有材料）。',
+    temperature: 0.5,
+    maxTokens: 2000,
   })
   let parsed: unknown
   try {
     parsed = JSON.parse(stripJsonFence(raw))
   } catch {
-    throw new Error('DeepSeek 返回的思维导图小题不是合法 JSON')
+    throw new Error('DeepSeek 返回的错题变式题不是合法 JSON')
   }
-  if (!Array.isArray(parsed) || parsed.length === 0) {
-    throw new Error('未能从思维导图生成小题')
+  const mcq = parseMindmapMcqObject(parsed)
+  if (!mcq) throw new Error('错题变式选择题未能通过校验')
+  return mcq
+}
+
+/** 错题本：基于题库选择题条目，生成一道同考点变式选择题 */
+export async function requestWrongBookChoiceVariant(input: {
+  title: string
+  correctAnswers: string[]
+  analysisHtml?: string
+  contentPlain?: string
+  preferStandardAnswer?: boolean
+}): Promise<MindmapDerivedMcq> {
+  const correct = input.correctAnswers.map((s) => s.trim()).filter(Boolean)
+  if (!input.title.trim() && correct.length === 0) {
+    throw new Error('原选择题信息不足')
   }
-  const out: MindmapDerivedMcq[] = []
-  for (const item of parsed) {
-    if (!item || typeof item !== 'object') continue
-    const o = item as Record<string, unknown>
-    const stem = String(o.stem ?? '').trim()
-    const mode = o.mode === 'multiple' ? 'multiple' : 'single'
-    const correct = Array.isArray(o.correct)
-      ? o.correct.map((x) => String(x).trim()).filter(Boolean)
-      : []
-    const distractors = Array.isArray(o.distractors)
-      ? o.distractors.map((x) => String(x).trim()).filter(Boolean)
-      : []
-    if (!stem) continue
-    if (mode === 'single' && correct.length !== 1) continue
-    if (mode === 'multiple' && correct.length < 2) continue
-    if (correct.length + distractors.length !== 5) continue
-    if (mcqStemLeaksAnswer(stem, correct)) continue
-    out.push({ stem, mode, correct, distractors })
-    if (out.length >= 10) break
+  const analysisText = input.analysisHtml ? htmlToPlainText(input.analysisHtml) : ''
+  const contentText = (input.contentPlain ?? '').trim()
+  const answerHint =
+    input.preferStandardAnswer !== false
+      ? WRONG_BOOK_MCQ_VARIANT_STANDARD_HINT
+      : WRONG_BOOK_MCQ_VARIANT_FLEXIBLE_HINT
+  let user = `下面是一道学习题库中的**选择题条目**（学员曾在此题上出错）。请生成 **1 道** 变式选择题。\n\n${WRONG_BOOK_MCQ_VARIANT_RULES}\n\n${answerHint}\n\n${AI_DERIVED_MCQ_FORMAT_RULES}\n\n【条目名称】${input.title.trim() || '（无）'}\n【原题标准答案（参考，不必逐字照抄为 correct）】\n${formatMcqAnswerList(correct)}`
+  if (contentText) user += `\n\n【原题干/材料摘录】\n${truncatePlainText(contentText, 6000)}`
+  if (analysisText) user += `\n\n【原解析（把握考点，勿照抄）】\n${truncatePlainText(analysisText, 4000)}`
+  user += `\n\n仅返回 **一个** JSON 对象，字段：stem, mode, correct, distractors。不要 markdown 代码块或其它说明。`
+  user = withHandoutQuizContextRules(
+    user,
+    input.title,
+    input.contentPlain ?? '',
+    analysisText,
+  )
+
+  const raw = await deepseekChatRaw(user, {
+    system: '只输出合法 JSON 对象。不要 markdown 围栏。',
+    temperature: 0.5,
+    maxTokens: 2000,
+  })
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(stripJsonFence(raw))
+  } catch {
+    throw new Error('DeepSeek 返回的错题变式题不是合法 JSON')
   }
-  if (out.length === 0) throw new Error('思维导图小题未能通过校验')
-  return out
+  const mcq = parseMindmapMcqObject(parsed)
+  if (!mcq) throw new Error('错题变式选择题未能通过校验')
+  return mcq
+}
+
+/** 错题本：基于原作答题/计算题，生成一道同考点但数值/结果不同的变式题 */
+export async function requestWrongBookGeneralVariant(input: {
+  title: string
+  contentHtml: string
+  analysisHtml?: string
+  preferStandardAnswer?: boolean
+}): Promise<HandoutDerivedGeneral> {
+  const contentText = htmlToPlainText(input.contentHtml)
+  const analysisText = input.analysisHtml ? htmlToPlainText(input.analysisHtml) : ''
+  if (!input.title.trim() && !contentText) {
+    throw new Error('原作答题内容为空')
+  }
+  const answerHint =
+    input.preferStandardAnswer !== false
+      ? WRONG_BOOK_GENERAL_VARIANT_STANDARD_HINT
+      : WRONG_BOOK_GENERAL_VARIANT_FLEXIBLE_HINT
+  let user = `下面是一道学员错题本中的**作答题/计算题**。请生成 **1 道** 变式作答题。\n\n${WRONG_BOOK_GENERAL_VARIANT_RULES}\n\n${answerHint}\n\n${AI_DERIVED_GENERAL_FOCUS_RULES}\n\n**字段**：stem（题干）、referenceAnswer（参考答案）、analysis（解析）、knowledgePoint（4～12 字考点标签）。使用简体中文。\n\n【条目名称】${input.title.trim() || '（无）'}\n【原题干与材料】\n${truncatePlainText(contentText, 8000) || '（无）'}`
+  if (analysisText) {
+    user += `\n\n【原参考答案与解析】\n${truncatePlainText(analysisText, 5000)}`
+  }
+  user += `\n\n仅返回 **一个** JSON 对象（不是数组），包含上述四个字段。不要 markdown 代码块或其它说明。`
+  user = withHandoutQuizContextRules(
+    user,
+    input.title,
+    input.contentHtml,
+    analysisText,
+  )
+
+  const raw = await deepseekChatRaw(user, {
+    system:
+      '只输出合法 JSON 对象。考点须与原错题一致；计算题换数时结果可与原题不同，概念题答案可同义调整。',
+    temperature: 0.52,
+    maxTokens: 1600,
+  })
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(stripJsonFence(raw))
+  } catch {
+    throw new Error('DeepSeek 返回的错题变式作答题不是合法 JSON')
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('错题变式作答题格式无效')
+  }
+  const o = parsed as Record<string, unknown>
+  const stem = String(o.stem ?? '').trim()
+  const referenceAnswer = String(o.referenceAnswer ?? '').trim()
+  const analysis = String(o.analysis ?? '').trim()
+  const knowledgePoint = String(o.knowledgePoint ?? '').trim() || '考点'
+  if (!stem || !referenceAnswer) {
+    throw new Error('错题变式作答题缺少题干或参考答案')
+  }
+  return {
+    stem,
+    referenceAnswer,
+    analysis: analysis || referenceAnswer,
+    knowledgePoint,
+  }
 }
 
 /** 测验用：不暴露正确答案，仅根据题干与选项给思路 */
@@ -606,31 +1267,51 @@ export async function requestChoiceTestAssist(input: {
 }
 
 /** 一般题：对照学员作答与官方解析，分析错因与改进方向 */
+export const GENERAL_MISTAKE_AWARE_SYSTEM =
+  `你是专业、耐心的学习助手，使用简体中文。\n\n${AI_CALCULATION_EXPLANATION_RULES}`
+
+export function buildGeneralMistakeAwareUserMessage(input: {
+  title: string
+  contentHtml: string
+  analysisHtml?: string
+  userAnswerHtml: string
+}): string {
+  const contentText = htmlToPlainText(input.contentHtml)
+  const analysisText = input.analysisHtml ? htmlToPlainText(input.analysisHtml) : ''
+  const userText = htmlToPlainText(input.userAnswerHtml)
+  return `请作为一名学习辅导老师。学员本题**未得满分或作答存在明显不足**。请对照「题目内容」「官方解析」与「学员作答」，完成：\n1）概括学员作答与标准思路或解析之间的**差距**；\n2）分析可能的**错因**（知识漏洞、审题偏差、推理跳步、单位换算错误、表述不完整等，择要说明）；\n3）给出**可操作的改进建议**与正确要点提示；若属计算/容量/频率题，须写出完整单位换算过程。\n使用 Markdown，语气耐心、具体，避免空泛批评。\n\n题目名称：${input.title.trim() || '（无）'}\n\n题目内容：\n${contentText || '（无）'}\n\n官方解析：\n${analysisText || '（暂无，请仅依据题目与学员作答合理推断）'}\n\n学员作答：\n${userText || '（未检测到文字作答，可提示学员补充）'}`
+}
+
 export async function requestGeneralMistakeAwareSolve(input: {
   title: string
   contentHtml: string
   analysisHtml?: string
   userAnswerHtml: string
 }): Promise<string> {
-  const contentText = htmlToPlainText(input.contentHtml)
-  const analysisText = input.analysisHtml ? htmlToPlainText(input.analysisHtml) : ''
-  const userText = htmlToPlainText(input.userAnswerHtml)
-  const user = `请作为一名学习辅导老师。学员本题**未得满分或作答存在明显不足**。请对照「题目内容」「官方解析」与「学员作答」，完成：\n1）概括学员作答与标准思路或解析之间的**差距**；\n2）分析可能的**错因**（知识漏洞、审题偏差、推理跳步、表述不完整等，择要说明）；\n3）给出**可操作的改进建议**与正确要点提示。\n使用 Markdown，语气耐心、具体，避免空泛批评。\n\n题目名称：${input.title.trim() || '（无）'}\n\n题目内容：\n${contentText || '（无）'}\n\n官方解析：\n${analysisText || '（暂无，请仅依据题目与学员作答合理推断）'}\n\n学员作答：\n${userText || '（未检测到文字作答，可提示学员补充）'}`
+  const user = buildGeneralMistakeAwareUserMessage(input)
   return deepseekChatRaw(user, {
-    system: '你是专业、耐心的学习助手，使用简体中文。',
+    system: GENERAL_MISTAKE_AWARE_SYSTEM,
     temperature: 0.4,
   })
 }
 
-/** 选择题：根据学员所选与正确答案，分析错因 */
-export async function requestChoiceMistakeAwareSolve(input: {
+export function choiceMistakeAwareSystem(mode: 'single' | 'multiple'): string {
+  const base =
+    mode === 'single'
+      ? '你是专业、耐心的学习助手。讲解单选题错因时只用「错选」「未选」，禁止用「漏选」。使用简体中文。'
+      : '你是专业、耐心的学习助手。讲解多选题时可区分错选与漏选。使用简体中文。'
+  return `${base}\n\n${AI_CALCULATION_EXPLANATION_RULES}`
+}
+
+export function buildChoiceMistakeAwareUserMessage(input: {
   title: string
   stem?: string
+  mode: 'single' | 'multiple'
   options: string[]
   correctAnswerTexts: string[]
   userSelectedTexts: string[]
   analysisHtml?: string
-}): Promise<string> {
+}): string {
   const opts = input.options.map((s, i) => `${String.fromCharCode(65 + i)}. ${s}`).join('\n')
   const correctBlock = input.correctAnswerTexts.map((s) => s.trim()).filter(Boolean).join('；') || '（无）'
   const userBlock =
@@ -639,14 +1320,35 @@ export async function requestChoiceMistakeAwareSolve(input: {
       : '（未选择任何选项）'
   const analysisText = input.analysisHtml ? htmlToPlainText(input.analysisHtml) : ''
   const stem = (input.stem ?? '').trim()
-  let user = `请作为一名学习辅导老师。学员在完成本题时**未得满分**（漏选、错选或未选）。请根据下列选项、正确答案与学员实际所选：\n1）简要说明**错因**（如概念混淆、多选/单选策略、干扰项误导等）；\n2）指出正确思路或关键判据；\n3）若学员漏选，说明还缺哪些正确项及为何重要。\n使用 Markdown，语气耐心，不要指责学员。\n\n题目名称：${input.title.trim() || '（无）'}`
+  const isSingle = input.mode === 'single'
+  const typeLine = isSingle
+    ? '本题是**单选题**（只能选一项）。学员**未得满分**时，请用「**错选**」或「**未选**」描述，**不要使用「漏选」**（漏选仅适用于多选题漏掉部分正确项）。'
+    : '本题是**多选题**（可选多项）。学员**未得满分**时，可区分「**错选**」（选了不应选的项）、「**漏选**」（漏掉应选的正确项）或「**未选**」。'
+  const step3 = isSingle
+    ? '3）若学员**错选**，说明其所选项为何不合适、正确项为何成立；若**未选**，提示应如何审题作答。'
+    : '3）若学员**漏选**，说明还缺哪些正确项及为何重要；若**错选**，说明误选项的问题。'
+  let user = `请作为一名学习辅导老师。${typeLine}\n请根据下列选项、正确答案与学员实际所选：\n1）简要说明**错因**（如概念混淆、审题偏差、干扰项误导、单位换算或进制错误等）；\n2）指出正确思路与关键判据；若属计算/容量/频率题，须写出完整单位换算过程，并把结果换算到与选项相同口径后再说明为何正确项成立；\n${step3}\n使用 Markdown，语气耐心，不要指责学员。\n\n题目名称：${input.title.trim() || '（无）'}`
   if (stem) user += `\n题干：${stem}`
   user += `\n\n选项：\n${opts}\n\n正确答案（文本）：${correctBlock}\n学员所选（文本）：${userBlock}`
   if (analysisText) {
     user += `\n\n题目官方解析：\n${analysisText}`
   }
+  return user
+}
+
+/** 选择题：根据学员所选与正确答案，分析错因（单选/多选用语区分） */
+export async function requestChoiceMistakeAwareSolve(input: {
+  title: string
+  stem?: string
+  mode: 'single' | 'multiple'
+  options: string[]
+  correctAnswerTexts: string[]
+  userSelectedTexts: string[]
+  analysisHtml?: string
+}): Promise<string> {
+  const user = buildChoiceMistakeAwareUserMessage(input)
   return deepseekChatRaw(user, {
-    system: '你是专业、耐心的学习助手，使用简体中文。',
+    system: choiceMistakeAwareSystem(input.mode),
     temperature: 0.4,
   })
 }

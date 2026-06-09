@@ -1,20 +1,48 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, watch, watchEffect } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRoute } from 'vue-router'
 import { APP_NAME, APP_TAGLINE } from '@/constants/branding'
-import { learningMenuItems } from '@/constants/learning-menu'
+import PomodoroStudyToggle from '@/components/PomodoroStudyToggle.vue'
+import TopNavMenu from '@/components/TopNavMenu.vue'
+import GuideWelcomeDialog from '@/views/guide/components/GuideWelcomeDialog.vue'
+import { hasSeenGuideWelcome } from '@/utils/appGuidePrefs'
+import { useWrongBookDueStore } from '@/stores/wrong-book-due'
 import { useWebUsageTracker } from '@/composables/useWebUsageTracker'
 import { useAppearanceStore } from '@/stores/appearance'
 import { applyDailyStudyingPenaltyIfNeeded } from '@/views/learning/question-bank-score/wen-wu-study-mode'
 import BackgroundMusicMiniPlayer from '@/components/BackgroundMusicMiniPlayer.vue'
 import { useBackgroundMusicStore } from '@/stores/background-music'
+import { usePageFocusStore } from '@/stores/page-focus'
+import { usePomodoroStore } from '@/stores/pomodoro'
+import { attachMouseShortcutNavigationGuards } from '@/utils/blockMouseShortcutNavigation'
 
 useWebUsageTracker()
 
 const route = useRoute()
+const pageFocusStore = usePageFocusStore()
+const { isStretch: pageFocusStretch } = storeToRefs(pageFocusStore)
+
 const hideMainNav = computed(() => route.name === 'wen-wu-rank')
+/** 查看/测验内页拉伸：隐藏站点顶栏（品牌 + 菜单） */
+const hideTopNav = computed(() => pageFocusStretch.value)
 const immersivePage = computed(() => route.name === 'wen-wu-rank')
+/** 左右分栏页：滚动在列内面板，避免与 page-viewport 叠出双滚动条 */
+const SPLIT_PANEL_INTERNAL_SCROLL_ROUTES = new Set([
+  'question-bank',
+  'question-bank-favorite',
+  'wrong-book',
+])
+
+/** 滚动条在页面内部面板，而非最外层 page-viewport */
+const internalScrollPage = computed(
+  () =>
+    route.name === 'markdown-preview' ||
+    route.name === 'learning-type-edit' ||
+    route.name === 'app-guide' ||
+    (typeof route.name === 'string' && SPLIT_PANEL_INTERNAL_SCROLL_ROUTES.has(route.name)) ||
+    pageFocusStretch.value,
+)
 
 watch(
   () => route.fullPath,
@@ -25,12 +53,63 @@ watch(
 )
 
 const appearanceStore = useAppearanceStore()
-const { shellClass, shellStyle, chromeSurfaceStyle, themeStyle } = storeToRefs(appearanceStore)
+const {
+  shellClass,
+  shellStyle,
+  shellTintOverlayStyle,
+  shellBackgroundImage,
+  shellBackgroundImgStyle,
+  chromeSurfaceStyle,
+  themeStyle,
+} = storeToRefs(appearanceStore)
 
 const backgroundMusicStore = useBackgroundMusicStore()
+const wrongBookDueStore = useWrongBookDueStore()
+const pomodoroStore = usePomodoroStore()
+const showAppWelcome = ref(false)
+let detachMouseShortcutGuards: (() => void) | null = null
+
+function onVisibilityRefresh() {
+  if (document.visibilityState === 'visible') void wrongBookDueStore.refresh()
+}
+
+function onStretchEscape(e: KeyboardEvent) {
+  if (e.key !== 'Escape' || !pageFocusStretch.value || !e.isTrusted) return
+  e.preventDefault()
+  pageFocusStore.exitStretch()
+}
+
 onMounted(() => {
+  detachMouseShortcutGuards = attachMouseShortcutNavigationGuards()
   backgroundMusicStore.ensureInitialized()
+  pomodoroStore.attachLifecycle()
+  pageFocusStore.syncFromBrowserFullscreen()
+  document.addEventListener('fullscreenchange', pageFocusStore.syncFromBrowserFullscreen)
+  window.addEventListener('keydown', onStretchEscape)
+  document.addEventListener('visibilitychange', onVisibilityRefresh)
+  void wrongBookDueStore.refresh()
+  wrongBookDueStore.startAutoRefresh()
+  if (!hasSeenGuideWelcome()) {
+    showAppWelcome.value = true
+  }
 })
+
+watch(
+  () => route.path,
+  (path) => {
+    if (!pageFocusStretch.value) return
+    const inApp =
+      path.startsWith('/learning') || path.startsWith('/tools') || path.startsWith('/settings')
+    if (!inApp) pageFocusStore.exitStretch()
+  },
+)
+
+watch(
+  () => route.path,
+  () => {
+    void wrongBookDueStore.refresh()
+  },
+)
 
 const appShellInlineStyle = computed(() => ({
   ...shellStyle.value,
@@ -43,6 +122,13 @@ watchEffect(() => {
 })
 
 onBeforeUnmount(() => {
+  detachMouseShortcutGuards?.()
+  detachMouseShortcutGuards = null
+  pomodoroStore.detachLifecycle()
+  document.removeEventListener('fullscreenchange', pageFocusStore.syncFromBrowserFullscreen)
+  window.removeEventListener('keydown', onStretchEscape)
+  document.removeEventListener('visibilitychange', onVisibilityRefresh)
+  wrongBookDueStore.stopAutoRefresh()
   for (const el of [document.documentElement, document.body]) {
     el.classList.remove('app-theme-light', 'app-theme-dark', 'app-theme-soft')
   }
@@ -50,27 +136,44 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="app-shell" :class="shellClass" :style="appShellInlineStyle">
-    <header class="top-nav">
+  <div
+    class="app-shell"
+    :class="[shellClass, { 'app-shell--page-focus-stretch': pageFocusStretch }]"
+    :style="appShellInlineStyle"
+  >
+    <img
+      v-if="shellBackgroundImage"
+      class="app-shell__bg-image"
+      :src="shellBackgroundImage"
+      alt=""
+      draggable="false"
+      :style="shellBackgroundImgStyle"
+    />
+    <div class="app-shell__bg-tint" aria-hidden="true" :style="shellTintOverlayStyle" />
+    <header v-if="!hideTopNav" class="top-nav">
       <div class="brand" aria-label="温故智学网">
         <img class="brand-logo" src="/favicon.svg" width="40" height="40" alt="" />
         <div class="brand-meta">
           <h1 class="brand-title">{{ APP_NAME }}</h1>
           <p class="brand-tagline">{{ APP_TAGLINE }}</p>
         </div>
+        <PomodoroStudyToggle class="brand-pomodoro" />
       </div>
-      <nav v-show="!hideMainNav">
-        <RouterLink v-for="item in learningMenuItems" :key="item.key" :to="item.path">
-          {{ item.title }}
-        </RouterLink>
-      </nav>
+      <TopNavMenu v-if="!hideMainNav" />
     </header>
-    <main class="page-content" :class="{ 'page-content--immersive': immersivePage }">
+    <main
+      class="page-content"
+      :class="{
+        'page-content--immersive': immersivePage,
+        'page-content--internal-scroll': internalScrollPage,
+      }"
+    >
       <div class="page-viewport">
         <RouterView />
       </div>
     </main>
-    <BackgroundMusicMiniPlayer />
+    <BackgroundMusicMiniPlayer v-show="!pageFocusStretch" />
+    <GuideWelcomeDialog v-model="showAppWelcome" />
   </div>
 </template>
 
@@ -84,12 +187,30 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
+  isolation: isolate;
+}
+
+.app-shell__bg-image {
+  position: fixed;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.app-shell__bg-tint {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
 }
 
 .top-nav {
+  position: relative;
+  z-index: 2;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
   padding: 16px 20px;
   border-bottom: 1px solid var(--app-border-soft);
   background: var(--app-surface);
@@ -102,6 +223,12 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 12px;
   min-width: 0;
+}
+
+.brand-pomodoro {
+  flex-shrink: 0;
+  margin-left: 4px;
+  align-self: center;
 }
 
 .brand-logo {
@@ -154,26 +281,6 @@ onBeforeUnmount(() => {
   }
 }
 
-.top-nav nav {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.top-nav a {
-  color: var(--app-text-muted);
-  text-decoration: none;
-  padding: 6px 10px;
-  border-radius: 8px;
-  transition: all 0.2s ease;
-}
-
-.top-nav a.router-link-active {
-  color: var(--app-primary);
-  font-weight: 600;
-  background: var(--app-primary-soft);
-}
-
 .page-content {
   padding: 20px;
   flex: 1;
@@ -182,6 +289,8 @@ onBeforeUnmount(() => {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  position: relative;
+  z-index: 2;
 }
 
 .page-content--immersive {
@@ -201,4 +310,23 @@ onBeforeUnmount(() => {
   -webkit-overflow-scrolling: touch;
 }
 
+.page-content--internal-scroll .page-viewport {
+  overflow: hidden;
+}
+
+.page-content--internal-scroll .page-viewport > * {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+</style>
+
+<style>
+/* 内页拉伸全屏：隐藏悬浮背景音乐面板 */
+.app-shell--page-focus-stretch .bgm-mini-player {
+  display: none !important;
+}
 </style>

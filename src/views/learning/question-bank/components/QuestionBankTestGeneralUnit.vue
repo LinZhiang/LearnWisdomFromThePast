@@ -11,6 +11,8 @@ defineProps<{
   generalSubmitted: boolean
   generalMistakeAware: boolean
   maxScore: number
+  /** 错题本：不显示分值，作答后选对/选错 */
+  binarySelfGrade?: boolean
   currentIndex: number
   learningTypeId?: number | null
   favoriteTarget?: QuestionFavoriteTarget | null
@@ -18,6 +20,7 @@ defineProps<{
 
 const answerHtml = defineModel<string>('answerHtml', { required: true })
 const selfScore = defineModel<number>('selfScore', { required: true })
+const generalSelfCorrect = defineModel<boolean | null>('generalSelfCorrect', { required: true })
 
 defineEmits<{
   (e: 'inject', html: string): void
@@ -37,11 +40,11 @@ const safe = (html?: string) => sanitizeRichHtml(html ?? '')
         :learning-type-id="learningTypeId"
         :target="favoriteTarget"
       />
-      <span class="test-score-tag">分值 {{ question.score ?? 0 }} 分</span>
+      <span v-if="!binarySelfGrade" class="test-score-tag">分值 {{ question.score ?? 0 }} 分</span>
     </div>
   </div>
   <div class="test-section">
-    <h5>题目内容</h5>
+    <h5>题干与材料</h5>
     <!-- eslint-disable-next-line vue/no-v-html -->
     <div class="test-rich ql-snow ql-editor" v-html="safe(question.content)" />
   </div>
@@ -60,7 +63,7 @@ const safe = (html?: string) => sanitizeRichHtml(html ?? '')
   </template>
   <template v-else>
     <div class="test-section">
-      <h5>题目解析</h5>
+      <h5>解析</h5>
       <!-- eslint-disable-next-line vue/no-v-html -->
       <div class="test-rich ql-snow ql-editor" v-html="safe(question.analysis)" />
     </div>
@@ -77,14 +80,41 @@ const safe = (html?: string) => sanitizeRichHtml(html ?? '')
         @inject="$emit('inject', $event)"
       />
     </div>
-    <div class="test-section test-self-score">
+    <div v-if="binarySelfGrade" class="test-section test-binary-verdict">
+      <h5>对照解析，本题答得对吗？</h5>
+      <p class="test-muted">错题本只记录对错，无需打分。请诚实自评后进入下一题。</p>
+      <div class="test-binary-verdict-actions" role="group" aria-label="自评对错">
+        <el-button
+          :type="generalSelfCorrect === true ? 'success' : 'default'"
+          size="large"
+          @click="generalSelfCorrect = true"
+        >
+          答对了
+        </el-button>
+        <el-button
+          :type="generalSelfCorrect === false ? 'danger' : 'default'"
+          size="large"
+          plain
+          @click="generalSelfCorrect = false"
+        >
+          答错了
+        </el-button>
+      </div>
+    </div>
+    <div v-else class="test-section test-self-score">
       <h5>根据解析自评得分</h5>
       <p class="test-muted">
         本题满分 {{ maxScore }} 分，请根据掌握程度在 0～满分之间打分。
       </p>
       <el-input-number v-model="selfScore" :min="0" :max="maxScore" />
     </div>
-    <el-button type="primary" @click="$emit('next-general')">下一题</el-button>
+    <el-button
+      type="primary"
+      :disabled="binarySelfGrade && generalSelfCorrect == null"
+      @click="$emit('next-general')"
+    >
+      下一题
+    </el-button>
   </template>
 </template>
 
@@ -151,5 +181,15 @@ const safe = (html?: string) => sanitizeRichHtml(html ?? '')
 
 .test-self-score {
   max-width: 360px;
+}
+
+.test-binary-verdict-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.test-binary-verdict-actions :deep(.el-button) {
+  min-width: 120px;
 }
 </style>

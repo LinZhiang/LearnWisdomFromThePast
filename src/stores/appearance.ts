@@ -2,6 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import {
   computeBackgroundFitCss,
+  computeBackgroundFitImgStyle,
   createDefaultBackgroundImageFit,
   isDataUrlBackground,
   loadImageDimensions,
@@ -9,7 +10,39 @@ import {
   normalizeBackgroundImageFit,
 } from '@/utils/backgroundImageFit'
 
+function mergeFitIntrinsicSize(
+  current: BackgroundImageFit | null,
+  width: number,
+  height: number,
+): BackgroundImageFit {
+  const base = createDefaultBackgroundImageFit(width, height)
+  if (!current) return base
+  return normalizeBackgroundImageFit(
+    {
+      focalX: current.focalX,
+      focalY: current.focalY,
+      zoom: current.zoom,
+      rotation: current.rotation,
+      flipX: current.flipX,
+      flipY: current.flipY,
+      intrinsicWidth: width,
+      intrinsicHeight: height,
+    },
+    width,
+    height,
+  )
+}
+
+function usesBackgroundImageFitLayer(img: string, fit: BackgroundImageFit | null): boolean {
+  return Boolean(fit && isDataUrlBackground(img) && fit.intrinsicWidth > 0)
+}
+
 export type ThemeStyle = 'light' | 'dark' | 'soft'
+
+/** 讲义 Markdown 预览/编辑正文字号（px），便于投影 */
+export const HANDOUT_FONT_SIZE_MIN = 12
+export const HANDOUT_FONT_SIZE_MAX = 32
+export const HANDOUT_FONT_SIZE_DEFAULT = 14
 
 interface AppearanceSettings {
   backgroundColor: string
@@ -20,6 +53,8 @@ interface AppearanceSettings {
   /** 顶栏、卡片、设置页等使用 --app-surface / --app-surface-alt 的底色不透明度（0–1），不影响文字与内容图 */
   chromeOpacity: number
   themeStyle: ThemeStyle
+  /** 讲义等内容区正文字号（px） */
+  handoutFontSizePx?: number
 }
 
 const STORAGE_KEY = 'wengu-zhixuewang-appearance'
@@ -32,6 +67,13 @@ const defaultSettings: AppearanceSettings = {
   backgroundImageFit: null,
   chromeOpacity: 0.92,
   themeStyle: 'light',
+  handoutFontSizePx: HANDOUT_FONT_SIZE_DEFAULT,
+}
+
+export function clampHandoutFontSizePx(value: number): number {
+  const n = Math.round(Number(value))
+  if (!Number.isFinite(n)) return HANDOUT_FONT_SIZE_DEFAULT
+  return Math.min(HANDOUT_FONT_SIZE_MAX, Math.max(HANDOUT_FONT_SIZE_MIN, n))
 }
 
 let viewportResizeBound = false
@@ -104,6 +146,7 @@ export const useAppearanceStore = defineStore('appearance', () => {
   const backgroundImageFit = ref<BackgroundImageFit | null>(defaultSettings.backgroundImageFit ?? null)
   const chromeOpacity = ref(defaultSettings.chromeOpacity)
   const themeStyle = ref<ThemeStyle>(defaultSettings.themeStyle)
+  const handoutFontSizePx = ref(defaultSettings.handoutFontSizePx ?? HANDOUT_FONT_SIZE_DEFAULT)
   const viewportWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 1920)
   const viewportHeight = ref(typeof window !== 'undefined' ? window.innerHeight : 1080)
 
@@ -115,39 +158,69 @@ export const useAppearanceStore = defineStore('appearance', () => {
    * 背景分层（CSS 中先写的层在最上）：色罩 → 可选背景图 → 主题画布。
    * 这样半透明色会叠在图片上方；仅图时也不会「只有图、没有叠色」。
    */
-  const shellStyle = computed(() => {
+  const shellTintOverlayStyle = computed(() => {
     const tint = shellTintRgba(themeStyle.value, backgroundColor.value, backgroundOpacity.value)
+    return {
+      backgroundImage: `linear-gradient(${tint}, ${tint})`,
+    }
+  })
+
+  /** 最底层主题画布；取景背景图/色罩由独立图层叠加 */
+  const shellStyle = computed(() => {
     const canvasLayer = 'linear-gradient(var(--app-outer-canvas), var(--app-outer-canvas))'
-    const tintLayer = `linear-gradient(${tint}, ${tint})`
     const img = backgroundImage.value.trim()
     if (img) {
       const fit = backgroundImageFit.value
-      const useFit = fit && isDataUrlBackground(img) && fit.intrinsicWidth > 0
+      if (usesBackgroundImageFitLayer(img, fit)) {
+        return {
+          backgroundColor: 'transparent',
+          backgroundImage: canvasLayer,
+          backgroundSize: 'auto',
+          backgroundRepeat: 'no-repeat',
+          backgroundPosition: 'center',
+        }
+      }
       const layer =
-        useFit ?
-          computeBackgroundFitCss(fit, viewportWidth.value, viewportHeight.value)
-        : { backgroundSize: 'cover', backgroundPosition: 'center center' }
+        fit && isDataUrlBackground(img) && fit.intrinsicWidth > 0
+          ? computeBackgroundFitCss(fit, viewportWidth.value, viewportHeight.value)
+          : { backgroundSize: 'cover', backgroundPosition: 'center center' }
       return {
         backgroundColor: 'transparent',
-        backgroundImage: `${tintLayer}, url("${img}"), ${canvasLayer}`,
-        backgroundSize: `100% 100%, ${layer.backgroundSize}, auto`,
-        backgroundRepeat: 'no-repeat, no-repeat, no-repeat',
-        backgroundPosition: `center, ${layer.backgroundPosition}, center`,
+        backgroundImage: `url("${img}"), ${canvasLayer}`,
+        backgroundSize: `${layer.backgroundSize}, auto`,
+        backgroundRepeat: 'no-repeat, no-repeat',
+        backgroundPosition: `${layer.backgroundPosition}, center`,
       }
     }
     return {
       backgroundColor: 'transparent',
-      backgroundImage: `${tintLayer}, ${canvasLayer}`,
-      backgroundSize: 'auto, auto',
-      backgroundRepeat: 'no-repeat, no-repeat',
-      backgroundPosition: 'center, center',
+      backgroundImage: canvasLayer,
+      backgroundSize: 'auto',
+      backgroundRepeat: 'no-repeat',
+      backgroundPosition: 'center',
     }
   })
 
   /** 顶栏/面板衬底透明度（与全页背景层分开） */
   const chromeSurfaceStyle = computed(() => ({
     '--app-chrome-opacity': String(clampOpacity(chromeOpacity.value)),
+    '--app-handout-font-size': `${clampHandoutFontSizePx(handoutFontSizePx.value)}px`,
+    '--app-handout-line-height': '1.65',
   }))
+
+  /** 本地取景背景图（独立图层，支持旋转） */
+  const shellBackgroundImage = computed(() => {
+    const img = backgroundImage.value.trim()
+    const fit = backgroundImageFit.value
+    if (!usesBackgroundImageFitLayer(img, fit)) return ''
+    return img
+  })
+
+  const shellBackgroundImgStyle = computed(() => {
+    const fit = backgroundImageFit.value
+    if (!fit) return {}
+    return computeBackgroundFitImgStyle(fit, viewportWidth.value, viewportHeight.value)
+  })
 
   const save = (): boolean => {
     const payload: AppearanceSettings = {
@@ -157,6 +230,7 @@ export const useAppearanceStore = defineStore('appearance', () => {
       backgroundImageFit: backgroundImageFit.value,
       chromeOpacity: chromeOpacity.value,
       themeStyle: themeStyle.value,
+      handoutFontSizePx: handoutFontSizePx.value,
     }
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
@@ -216,6 +290,11 @@ export const useAppearanceStore = defineStore('appearance', () => {
         parsed.themeStyle === 'dark' || parsed.themeStyle === 'soft'
           ? parsed.themeStyle
           : defaultSettings.themeStyle
+      handoutFontSizePx.value = clampHandoutFontSizePx(
+        typeof parsed.handoutFontSizePx === 'number'
+          ? parsed.handoutFontSizePx
+          : (defaultSettings.handoutFontSizePx ?? HANDOUT_FONT_SIZE_DEFAULT),
+      )
       if (legacyKey) {
         void save()
         localStorage.removeItem(legacyKey)
@@ -228,6 +307,7 @@ export const useAppearanceStore = defineStore('appearance', () => {
       backgroundImageFit.value = defaultSettings.backgroundImageFit ?? null
       chromeOpacity.value = defaultSettings.chromeOpacity
       themeStyle.value = defaultSettings.themeStyle
+      handoutFontSizePx.value = defaultSettings.handoutFontSizePx ?? HANDOUT_FONT_SIZE_DEFAULT
       applyAppearanceThemeToDocument(themeStyle.value)
     }
   }
@@ -242,6 +322,8 @@ export const useAppearanceStore = defineStore('appearance', () => {
     void save()
   }
 
+  let backgroundImageFitInitGen = 0
+
   /** 返回 false 表示未写入本地存储（多为配额不足），调用方应保留原图或提示用户 */
   const updateBackgroundImage = (value: string): boolean => {
     const next = value.trim()
@@ -251,7 +333,9 @@ export const useAppearanceStore = defineStore('appearance', () => {
     if (!next || !isDataUrlBackground(next)) {
       backgroundImageFit.value = null
     } else if (prev !== next) {
-      backgroundImageFit.value = null
+      // 先给默认取景，预览区可立即显示；initBackgroundImageFitFromUrl 再校正尺寸
+      backgroundImageFit.value = createDefaultBackgroundImageFit(1920, 1080)
+      backgroundImageFitInitGen += 1
     }
     if (!save()) {
       backgroundImage.value = prev
@@ -282,11 +366,24 @@ export const useAppearanceStore = defineStore('appearance', () => {
 
   const initBackgroundImageFitFromUrl = async (src: string): Promise<boolean> => {
     if (!isDataUrlBackground(src)) return false
+    const gen = backgroundImageFitInitGen
+    const trimmed = src.trim()
+    if (backgroundImage.value.trim() !== trimmed) return false
     try {
-      const { width, height } = await loadImageDimensions(src)
-      return updateBackgroundImageFit(createDefaultBackgroundImageFit(width, height))
+      const { width, height } = await loadImageDimensions(trimmed)
+      if (gen !== backgroundImageFitInitGen || backgroundImage.value.trim() !== trimmed) {
+        return false
+      }
+      return updateBackgroundImageFit(
+        mergeFitIntrinsicSize(backgroundImageFit.value, width, height),
+      )
     } catch {
-      return updateBackgroundImageFit(createDefaultBackgroundImageFit(1920, 1080))
+      if (gen !== backgroundImageFitInitGen || backgroundImage.value.trim() !== trimmed) {
+        return false
+      }
+      return updateBackgroundImageFit(
+        mergeFitIntrinsicSize(backgroundImageFit.value, 1920, 1080),
+      )
     }
   }
 
@@ -302,6 +399,11 @@ export const useAppearanceStore = defineStore('appearance', () => {
     void save()
   }
 
+  const updateHandoutFontSizePx = (value: number) => {
+    handoutFontSizePx.value = clampHandoutFontSizePx(value)
+    void save()
+  }
+
   const reset = () => {
     backgroundColor.value = defaultSettings.backgroundColor
     backgroundOpacity.value = defaultSettings.backgroundOpacity
@@ -309,6 +411,7 @@ export const useAppearanceStore = defineStore('appearance', () => {
     backgroundImageFit.value = defaultSettings.backgroundImageFit ?? null
     chromeOpacity.value = defaultSettings.chromeOpacity
     themeStyle.value = defaultSettings.themeStyle
+    handoutFontSizePx.value = defaultSettings.handoutFontSizePx ?? HANDOUT_FONT_SIZE_DEFAULT
     applyAppearanceThemeToDocument(themeStyle.value)
     void save()
   }
@@ -320,8 +423,14 @@ export const useAppearanceStore = defineStore('appearance', () => {
     backgroundImageFit,
     chromeOpacity,
     themeStyle,
+    handoutFontSizePx,
+    viewportWidth,
+    viewportHeight,
     shellClass,
     shellStyle,
+    shellTintOverlayStyle,
+    shellBackgroundImage,
+    shellBackgroundImgStyle,
     chromeSurfaceStyle,
     applyThemeToDocument: () => applyAppearanceThemeToDocument(themeStyle.value),
     load,
@@ -332,6 +441,7 @@ export const useAppearanceStore = defineStore('appearance', () => {
     initBackgroundImageFitFromUrl,
     updateChromeOpacity,
     updateThemeStyle,
+    updateHandoutFontSizePx,
     reset,
   }
 })

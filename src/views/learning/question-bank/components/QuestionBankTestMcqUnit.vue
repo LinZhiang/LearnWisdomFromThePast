@@ -7,7 +7,7 @@ import QuestionBankFavoriteButton from './QuestionBankFavoriteButton.vue'
 import type { TestUnit } from './questionBankTestTypes'
 
 const props = defineProps<{
-  unit: Exclude<TestUnit, { kind: 'general' }>
+  unit: Exclude<TestUnit, { kind: 'general' } | { kind: 'handout-general' }>
   mcqSubmitted: boolean
   currentOptions: string[]
   currentMcqMode: 'single' | 'multiple' | null
@@ -23,6 +23,8 @@ const props = defineProps<{
   currentIndex: number
   learningTypeId?: number | null
   favoriteTarget?: QuestionFavoriteTarget | null
+  /** 错题本：不展示本题分值（选择题自动判对错） */
+  hideScoreTag?: boolean
 }>()
 
 defineEmits<{
@@ -41,10 +43,16 @@ const displayScore = () =>
     scoreMcqSelection(props.unit.correctIndices, props.selectedIndices, props.maxScore) * 100,
   ) / 100
 
-const assistTitle = () =>
-  props.unit.kind === 'mindmap-mcq'
-    ? `${props.unit.parent.title} · ${props.unit.stem}`
-    : props.unit.question.title
+const isDerivedMcqLike = () =>
+  props.unit.kind === 'mindmap-mcq' || props.unit.kind === 'handout-judgment'
+
+const assistTitle = () => {
+  const u = props.unit
+  if (u.kind === 'mindmap-mcq' || u.kind === 'handout-judgment') {
+    return `${u.parent.title} · ${u.stem}`
+  }
+  return u.question.title
+}
 </script>
 
 <template>
@@ -52,7 +60,11 @@ const assistTitle = () =>
     <h4 class="test-q-title">
       <template v-if="unit.kind === 'mindmap-mcq'">
         {{ unit.parent.title }}
-        <span class="test-subtag">导图小题 {{ unit.subIndex }}/{{ unit.subTotal }}</span>
+        <span class="test-subtag">导图选择 {{ unit.subIndex }}/{{ unit.subTotal }}</span>
+      </template>
+      <template v-else-if="unit.kind === 'handout-judgment'">
+        {{ unit.parent.title }}
+        <span class="test-subtag">判断 {{ unit.subIndex }}/{{ unit.subTotal }}</span>
       </template>
       <template v-else>{{ unit.question.title }}</template>
     </h4>
@@ -62,25 +74,45 @@ const assistTitle = () =>
         :learning-type-id="learningTypeId"
         :target="favoriteTarget"
       />
-      <span class="test-score-tag">本题满分 {{ maxScore }} 分</span>
+      <span v-if="!hideScoreTag" class="test-score-tag">本题满分 {{ maxScore }} 分</span>
     </div>
   </div>
-  <p v-if="unit.kind === 'mindmap-mcq'" class="test-stem">{{ unit.stem }}</p>
+  <p v-if="unit.stem" class="test-stem">
+    {{ unit.stem }}
+  </p>
   <p class="test-mode-hint">
-    {{ unit.mode === 'single' ? '单选题：选一项' : '多选题：可选多项' }} · 共 5 个选项
+    <template v-if="unit.kind === 'handout-judgment'">判断题：判断上述陈述是否正确</template>
+    <template v-else>
+      {{ unit.mode === 'single' ? '单选题：选一项' : '多选题：可选多项' }} · 共
+      {{ currentOptions.length }} 个选项
+    </template>
   </p>
 
   <template v-if="!mcqSubmitted">
     <el-radio-group v-if="currentMcqMode === 'single'" v-model="selectedSingle" class="test-options">
-      <el-radio v-for="(opt, idx) in currentOptions" :key="idx" :label="idx" class="test-radio-line">
-        <span class="test-opt-label">{{ String.fromCharCode(65 + idx) }}.</span>
-        {{ opt }}
+      <el-radio
+        v-for="(opt, idx) in currentOptions"
+        :key="idx"
+        :label="idx"
+        class="test-mcq-option"
+      >
+        <span class="test-mcq-option__inner">
+          <span class="test-mcq-option__letter">{{ String.fromCharCode(65 + idx) }}</span>
+          <span class="test-mcq-option__text">{{ opt }}</span>
+        </span>
       </el-radio>
     </el-radio-group>
     <el-checkbox-group v-else v-model="selectedMulti" class="test-options">
-      <el-checkbox v-for="(opt, idx) in currentOptions" :key="idx" :label="idx" class="test-checkbox-line">
-        <span class="test-opt-label">{{ String.fromCharCode(65 + idx) }}.</span>
-        {{ opt }}
+      <el-checkbox
+        v-for="(opt, idx) in currentOptions"
+        :key="idx"
+        :label="idx"
+        class="test-mcq-option"
+      >
+        <span class="test-mcq-option__inner">
+          <span class="test-mcq-option__letter">{{ String.fromCharCode(65 + idx) }}</span>
+          <span class="test-mcq-option__text">{{ opt }}</span>
+        </span>
       </el-checkbox>
     </el-checkbox-group>
 
@@ -98,15 +130,18 @@ const assistTitle = () =>
   </template>
   <template v-else>
     <div class="test-options test-options--readonly">
-      <div v-for="(opt, idx) in currentOptions" :key="idx" class="test-opt-row">
-        <span class="test-opt-label">{{ String.fromCharCode(65 + idx) }}.</span>
-        <span
-          :class="{
-            'is-correct': unit.correctIndices.includes(idx),
-            'is-wrong': selectedIndices.includes(idx) && !unit.correctIndices.includes(idx),
-          }"
-        >
-          {{ opt }}
+      <div v-for="(opt, idx) in currentOptions" :key="idx" class="test-mcq-option test-mcq-option--readonly">
+        <span class="test-mcq-option__inner">
+          <span class="test-mcq-option__letter">{{ String.fromCharCode(65 + idx) }}</span>
+          <span
+            class="test-mcq-option__text"
+            :class="{
+              'is-correct': unit.correctIndices.includes(idx),
+              'is-wrong': selectedIndices.includes(idx) && !unit.correctIndices.includes(idx),
+            }"
+          >
+            {{ opt }}
+          </span>
         </span>
       </div>
     </div>
@@ -117,7 +152,7 @@ const assistTitle = () =>
       </ul>
     </div>
     <div v-if="analysisForCurrent.trim()" class="test-section">
-      <h5>题目解析</h5>
+      <h5>解析</h5>
       <!-- eslint-disable-next-line vue/no-v-html -->
       <div class="test-rich ql-snow ql-editor" v-html="safe(analysisForCurrent)" />
     </div>
@@ -131,7 +166,7 @@ const assistTitle = () =>
         :mistake-aware="mcqMistakeAware"
         :choice-user-selected-texts="mcqUserSelectedLabels"
         :choice-options="currentOptions"
-        :choice-stem="unit.kind === 'mindmap-mcq' ? unit.stem : undefined"
+        :choice-stem="isDerivedMcqLike() ? unit.stem : undefined"
       />
     </div>
     <p class="test-score-result">本题得分：{{ displayScore() }} / {{ maxScore }} 分</p>
@@ -201,8 +236,6 @@ const assistTitle = () =>
 
 .test-stem {
   margin: 0;
-  font-size: 15px;
-  line-height: 1.55;
 }
 
 .test-mode-hint {
@@ -214,55 +247,102 @@ const assistTitle = () =>
 .test-options {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   align-items: stretch;
   width: 100%;
 }
 
-/* 与拆分前一致：每个选项独占一行（避免 el-radio/el-checkbox 默认横向排列） */
-.test-options :deep(.el-radio),
-.test-options :deep(.el-checkbox) {
+.test-options.el-radio-group,
+.test-options.el-checkbox-group {
   display: flex;
-  align-items: flex-start;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+/* 每行：单选框 + 字母 + 正文，与题干左缘对齐 */
+.test-options :deep(.test-mcq-option.el-radio),
+.test-options :deep(.test-mcq-option.el-checkbox) {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: center;
   width: 100%;
   max-width: 100%;
-  margin-right: 0;
-  margin-bottom: 0;
+  margin: 0;
+  padding: 6px 10px;
   height: auto;
-  min-height: 32px;
+  min-height: 0;
+  box-sizing: border-box;
   white-space: normal;
-  line-height: 1.5;
+  line-height: 1.45;
+  border: 1px solid color-mix(in srgb, var(--app-border-soft) 55%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--app-surface) 38%, transparent);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease;
 }
 
-.test-options :deep(.el-radio__input),
-.test-options :deep(.el-checkbox__input) {
-  display: inline-flex;
-  align-items: flex-start;
+.test-options :deep(.test-mcq-option.el-radio.is-checked),
+.test-options :deep(.test-mcq-option.el-checkbox.is-checked) {
+  border-color: color-mix(in srgb, var(--el-color-primary-light-5, #93c5fd) 70%, transparent);
+  background: color-mix(in srgb, var(--el-color-primary-light-9, #eff6ff) 52%, transparent);
+}
+
+.test-options :deep(.test-mcq-option .el-radio__input),
+.test-options :deep(.test-mcq-option .el-checkbox__input) {
+  grid-column: 1;
+  grid-row: 1;
+  align-self: center;
+  margin: 0;
+  height: auto;
   line-height: 1;
-  flex-shrink: 0;
 }
 
-.test-options :deep(.el-radio__label),
-.test-options :deep(.el-checkbox__label) {
+.test-options :deep(.test-mcq-option .el-radio__label),
+.test-options :deep(.test-mcq-option .el-checkbox__label) {
+  grid-column: 2;
+  grid-row: 1;
+  flex: none;
+  width: 100%;
+  min-width: 0;
+  padding-left: 0 !important;
+  margin-left: 0 !important;
+  white-space: normal;
+  line-height: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  color: inherit;
+}
+
+.test-mcq-option__inner {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45em;
+  width: 100%;
+  min-width: 0;
+}
+
+.test-mcq-option__letter {
+  flex-shrink: 0;
+  font-weight: 600;
+  font-size: 0.92em;
+  line-height: inherit;
+  color: var(--app-text-muted);
+}
+
+.test-mcq-option__letter::after {
+  content: '.';
+  margin-left: 0.05em;
+}
+
+.test-mcq-option__text {
   flex: 1;
   min-width: 0;
-  white-space: normal;
-  line-height: 1.5;
-  padding-left: 8px;
-}
-
-.test-radio-line,
-.test-checkbox-line {
-  margin: 0;
-  align-items: flex-start;
-  white-space: normal;
-  height: auto;
-  line-height: 1.5;
-}
-
-.test-opt-label {
-  font-weight: 600;
-  margin-right: 6px;
+  line-height: inherit;
+  word-break: break-word;
 }
 
 .test-assist-block {
@@ -277,8 +357,6 @@ const assistTitle = () =>
   border-radius: 8px;
   padding: 10px 12px;
   background: var(--app-surface-alt);
-  font-size: 14px;
-  line-height: 1.6;
 }
 
 .test-error {
@@ -287,15 +365,23 @@ const assistTitle = () =>
   font-size: 13px;
 }
 
-.test-options--readonly .test-opt-row {
-  display: flex;
-  gap: 8px;
-  padding: 6px 0;
-  border-bottom: 1px solid var(--app-border-soft);
+.test-mcq-option--readonly {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  line-height: 1.45;
+  border: 1px solid color-mix(in srgb, var(--app-border-soft) 55%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--app-surface) 38%, transparent);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  box-sizing: border-box;
 }
 
-.test-options--readonly .test-opt-row:last-child {
-  border-bottom: none;
+.test-mcq-option--readonly .test-mcq-option__inner {
+  grid-column: 2;
 }
 
 .is-correct {

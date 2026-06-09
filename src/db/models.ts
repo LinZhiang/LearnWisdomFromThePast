@@ -9,18 +9,36 @@ export interface LearningType {
 
 export interface QuestionBank {
   id?: number
-  type: 'general' | 'choice' | 'mindmap'
+  type: 'general' | 'choice' | 'mindmap' | 'handout'
   title: string
   learningTypeId?: number
   content: string
   analysis: string
   score: number
+  /** 讲义：测验时是否自动生成选择题 */
+  handoutAutoMcq?: boolean
+  /** 讲义自动出题时的目标题数（1～20，仅 handoutAutoMcq 为 true 时有效） */
+  handoutMcqCount?: number
+  /** 讲义：测验时是否自动生成一般题型（计算/运算等） */
+  handoutAutoGeneral?: boolean
+  /** 讲义一般题目标题数（1～20，仅 handoutAutoGeneral 为 true 时有效） */
+  handoutGeneralCount?: number
+  /** 讲义：测验时是否自动生成判断题 */
+  handoutAutoJudgment?: boolean
+  /** 讲义判断题目标题数（1～20，仅 handoutAutoJudgment 为 true 时有效） */
+  handoutJudgmentCount?: number
+  /** 知识点重要性（1～4 星；未设置时按 2 星普通处理） */
+  importance?: number
   createdAt: string
   updatedAt: string
 }
 
 /** 题库测验 AI 预生成结果（干扰项 / 导图小题），按题目持久化以减少重复扣费 */
-export type QuestionBankAiPrepKind = 'choice-distractors' | 'mindmap-mcqs'
+export type QuestionBankAiPrepKind =
+  | 'choice-distractors'
+  | 'mindmap-mcqs'
+  | 'handout-mcqs'
+  | 'handout-general'
 
 export interface QuestionBankAiPrep {
   id?: number
@@ -130,8 +148,8 @@ export interface WrongQuestion {
   questionBankId?: number
   /** 导图衍生小题快照：`FavoriteDerivedMcqPayload` JSON */
   derivedPayloadJson?: string
-  /** 题型：general/choice/mindmap-mcq */
-  questionType: 'general' | 'choice' | 'mindmap-mcq'
+  /** 题型：general/choice/mindmap-mcq/handout-judgment */
+  questionType: 'general' | 'choice' | 'mindmap-mcq' | 'handout-judgment'
   title: string
   /** 导图衍生小题题干 */
   stem?: string
@@ -141,8 +159,8 @@ export interface WrongQuestion {
   nextReviewAt: string
   lastQuizSessionId?: string
   /**
-   * 连续在不同测验场次中该题满分次数（同一场 quizSessionId 只计 1 次）。
-   * 连续满 3 场测验后自动移出错题本；再次答错时清零。
+   * 连续答对次数（同一场 quizSessionId 只计 1 次）。
+   * 连续满 3 次满分后自动移出错题本；中途答错时清零并重新累计。
    */
   fullScoreQuizStreak?: number
   /** 最近一次为 streak 计分的题目测试会话 id */

@@ -223,9 +223,10 @@ button {
   overflow: hidden;
 }
 
+/* 各页顶栏说明区：不用毛玻璃，避免背景图被强烈虚化 */
 .app-shell .page-hero {
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 .app-shell .settings-page {
@@ -374,5 +375,201 @@ body.app-theme-soft .el-drawer {
   background-color: var(--el-color-success-light-9);
   border-color: var(--el-color-success-light-5);
   color: var(--el-color-success);
+}
+
+/*
+ * 学习题库 / 错题本 / 题库收藏：顶栏、工具条、表格内按钮与标签随「学习内容字号」联动
+ */
+.question-bank-list,
+.wrong-list-panel,
+.favorite-list {
+  --learning-list-ui-font: var(--app-handout-font-size, 14px);
+  --learning-list-ui-secondary: calc(var(--app-handout-font-size, 14px) * 0.93);
+  --learning-list-btn-height: max(32px, calc(var(--app-handout-font-size, 14px) * 2.35));
+}
+
+.question-bank-header-title,
+.wrong-list-topic,
+.favorite-list-topic {
+  font-size: 1em;
+  line-height: var(--app-handout-line-height, 1.65);
+}
+
+.parent-node-hint,
+.favorite-hint,
+.wrong-list-panel > p,
+.question-bank-list-body > p {
+  font-size: var(--learning-list-ui-secondary, 0.93em);
+  line-height: var(--app-handout-line-height, 1.65);
+}
+
+.wrong-toolbar-label {
+  font-size: var(--learning-list-ui-secondary, 0.93em);
+}
+
+.wrong-toolbar .wrong-toolbar-btn.el-button,
+.question-bank-header-actions .el-button,
+.favorite-header-actions .el-button {
+  font-size: var(--learning-list-ui-secondary, 0.93em);
+  height: var(--learning-list-btn-height, 32px);
+  padding-left: 1em;
+  padding-right: 1em;
+}
+
+.wrong-toolbar .wrong-toolbar-input .el-input__wrapper {
+  font-size: var(--learning-list-ui-secondary, 0.93em);
+}
+
+.wrong-toolbar .el-switch__label {
+  font-size: calc(var(--app-handout-font-size, 14px) * 0.86);
+}
+
+.question-bank-list .el-button,
+.wrong-list-panel .el-button,
+.favorite-list .el-button {
+  font-size: var(--learning-list-ui-secondary, 0.93em);
+}
+
+.question-bank-list .el-button.el-button--small,
+.wrong-list-panel .el-button.el-button--small,
+.favorite-list .el-button.el-button--small {
+  height: var(--learning-list-btn-height, 32px);
+  padding-left: calc(var(--app-handout-font-size, 14px) * 0.85);
+  padding-right: calc(var(--app-handout-font-size, 14px) * 0.85);
+}
+
+.question-bank-list .el-tag,
+.wrong-list-panel .el-tag,
+.favorite-list .el-tag,
+.question-bank-header .el-tag {
+  --el-tag-font-size: var(--learning-list-ui-secondary, 0.93em);
+  font-size: var(--learning-list-ui-secondary, 0.93em) !important;
+  line-height: 1.4;
+  height: auto;
+  min-height: calc(var(--app-handout-font-size, 14px) * 1.85);
+  padding: 2px calc(var(--app-handout-font-size, 14px) * 0.55);
+}
+
+.question-table-head,
+.question-table-row,
+.wrong-table-head,
+.wrong-table-row,
+.favorite-table-head,
+.favorite-table-row {
+  font-size: 1em;
+}
+
+.cell-next-review {
+  font-size: var(--learning-list-ui-secondary, 0.93em);
+  line-height: var(--app-handout-line-height, 1.65);
+}
+
+.wrong-pagination-bar {
+  font-size: var(--learning-list-ui-secondary, 0.93em);
+}
+
+/*
+ * 界面设置「学习内容字号」（--app-handout-font-size）：
+ * 讲义、题目查看、题目测验正文与选项等保持一致。
+ */
+.detail-rich,
+.detail-rich.ql-editor,
+.test-rich,
+.test-rich.ql-editor,
+.derived-rich,
+.derived-rich.ql-editor,
+.choice-detail-content,
+.test-stem,
+.derived-stem,
+.derived-options,
+.wrong-detail-body > .detail-section:first-child .detail-text,
+.test-assist-md,
+.test-assist-md .deepseek-md,
+.deepseek-md,
+.keyword-panel {
+  font-size: var(--app-handout-font-size, 14px);
+  line-height: var(--app-handout-line-height, 1.65);
+}
+
+.keyword-panel .el-button {
+  font-size: 0.93em;
+}
+
+.keyword-panel .el-input__count {
+  font-size: 0.8em;
+}
+
+.test-options .el-radio__label,
+.test-options .el-checkbox__label,
+.test-options .test-mcq-option__text,
+.test-options--readonly .test-mcq-option--readonly {
+  font-size: var(--app-handout-font-size, 14px) !important;
+  line-height: 1.45 !important;
+}
+
+.test-options .test-mcq-option__letter {
+  font-size: calc(var(--app-handout-font-size, 14px) * 0.92) !important;
+}
+
+/* 表格、代码块、算式对齐块：与学习内容字号同步（勿写死 12/13px） */
+.markdown-prose-preview table,
+.markdown-prose-preview th,
+.markdown-prose-preview td,
+.markdown-prose-preview pre,
+.markdown-prose-preview pre code,
+.detail-rich table,
+.detail-rich th,
+.detail-rich td,
+.detail-rich pre,
+.detail-rich pre code,
+.test-rich table,
+.test-rich th,
+.test-rich td,
+.test-rich pre,
+.test-rich pre code,
+.material-preview.prose table,
+.material-preview.prose th,
+.material-preview.prose td,
+.material-preview.prose pre,
+.material-preview.prose pre code,
+.deepseek-md table,
+.deepseek-md th,
+.deepseek-md td,
+.deepseek-md pre,
+.deepseek-md pre code {
+  font-size: inherit;
+}
+
+.markdown-prose-preview pre,
+.detail-rich pre,
+.test-rich pre,
+.material-preview.prose pre,
+.deepseek-md pre {
+  font-size: 1em;
+  line-height: 1.55;
+}
+
+.markdown-prose-preview table,
+.detail-rich table,
+.test-rich table,
+.material-preview.prose table,
+.deepseek-md table {
+  font-size: 1em;
+}
+
+/* Markdown / KaTeX：讲义预览、DeepSeek 回答、资料整理等共用 */
+.markdown-prose-preview .katex,
+.deepseek-md .katex,
+.material-preview.prose .katex {
+  font-size: 1.05em;
+}
+
+.markdown-prose-preview .katex-display,
+.deepseek-md .katex-display,
+.material-preview.prose .katex-display {
+  display: block;
+  margin: 0.65em 0;
+  overflow-x: auto;
+  text-align: center;
 }
 

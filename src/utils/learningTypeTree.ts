@@ -11,6 +11,16 @@ export function collectLeafDescendants(node: LearningTypeTreeNode): LearningType
   return node.children.flatMap(collectLeafDescendants)
 }
 
+/** 收集节点自身及子树内全部节点 id（父节点选中时，错题可能挂在父级或非叶子分类上） */
+export function collectSubtreeNodeIds(node: LearningTypeTreeNode): number[] {
+  const ids: number[] = []
+  if (node.id != null) ids.push(node.id)
+  for (const child of node.children) {
+    ids.push(...collectSubtreeNodeIds(child))
+  }
+  return ids
+}
+
 export function findLearningTypeNodeById(
   nodes: LearningTypeTreeNode[],
   id: number,

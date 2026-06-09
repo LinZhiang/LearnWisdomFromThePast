@@ -8,3 +8,5 @@ export const APP_DESCRIPTION =
   '温故智学网将「温故知新」与智能工具结合：支持学习题库测验、错题本、题库收藏、答题日志与思维导图整理，并可用 AI 辅助解析与归纳，适合备考与日常知识巩固。'
 /** 导出本地缓存 JSON 时的文件名前缀 */
 export const APP_CACHE_FILE_PREFIX = 'wengu-zhixuewang-cache'
+/** 导出题库包（仅学习类型 + 题库）时的文件名前缀 */
+export const APP_BANK_PACK_FILE_PREFIX = 'wengu-zhixuewang-bank-pack'

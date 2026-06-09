@@ -29,8 +29,8 @@ const onTreeSelect = (id: number | null) => {
       v-if="wb.showQuestionTest"
       :learning-type-name="wb.selectedLearningTypeName"
       :learning-type-id="wb.selectedLearningTypeId"
-      :questions="wb.wrongBookTestQuestionBanks"
-      :preset-units="wb.wrongBookTestPresetUnits"
+      :questions="wb.wrongBookTestBankLookup"
+      :wrong-book-rows="wb.wrongBookTestSnapshot"
       :loading="wb.loading"
       :type-text-map="wb.typeTextMap"
       log-menu-origin="wrong-book"
@@ -90,7 +90,7 @@ const onTreeSelect = (id: number | null) => {
         <span class="page-kicker">智学 07</span>
         <h2 class="page-title">错题本</h2>
         <p class="page-subtitle">
-          自动收集题目测试中的错题；按学习类型（知识点）筛选，并基于艾宾浩斯记忆曲线自动安排下次复习。同一错题在<strong>连续三场</strong>题目测试中均满分后，会自动移出错题本（与手动删除相同，可在回收站恢复）；中途再错则重新计数。
+          自动收集测验中的错题；按学习类型（知识点）筛选，并基于艾宾浩斯记忆曲线安排下次复习。<strong>错题测验</strong>会按原题考点生成变式题（换情境或换提问角度），不会把原题原样再考一遍；约半数以上仍以原标准答案为参照，其余可在同一考点下适度调整正确答案。打开详情不会推进复习轮次；仅在错题测验中单题答对且已到「下次复习」时间时，才会进入下一轮复习；<strong>错题测验中答错不会改动</strong>复习轮次、下次复习时间与错误次数。同一错题需<strong>连续三次</strong>测验均满分才会自动移出错题本（可在回收站恢复）；中途一旦答错，连续计数会清零并重新累计。
         </p>
       </header>
 
@@ -99,7 +99,8 @@ const onTreeSelect = (id: number | null) => {
           :loading="wb.loading"
           :tree-nodes="wb.treeNodes"
           :selected-id="wb.selectedLearningTypeId"
-          :leaf-selectable-only="true"
+          :node-due-counts="wb.dueCountByTreeNode"
+          :leaf-selectable-only="false"
           @update:selected-id="onTreeSelect"
         />
         <section class="wrong-list-panel">
@@ -121,6 +122,42 @@ const onTreeSelect = (id: number | null) => {
           />
           <template v-else>
           <div class="wrong-list-head">
+            <div v-if="wb.dueNoticeText" class="wrong-due-notice-row">
+              <div class="wrong-due-notice-main">
+                <p
+                  class="wrong-due-notice"
+                  :class="{ 'wrong-due-notice--action': wb.dueCountInScope > 0 }"
+                  role="status"
+                >
+                  {{ wb.dueNoticeText }}
+                </p>
+                <div
+                  v-if="wb.dueOutsideBranches.length > 0"
+                  class="wrong-due-outside-links"
+                >
+                  <span class="wrong-due-outside-links__label">跳转待复习：</span>
+                  <button
+                    v-for="branch in wb.dueOutsideBranches"
+                    :key="branch.learningTypeId"
+                    type="button"
+                    class="wrong-due-outside-link"
+                    @click="wb.selectLearningTypeForDue(branch.learningTypeId)"
+                  >
+                    {{ branch.name }}（{{ branch.count }}）
+                  </button>
+                </div>
+              </div>
+              <el-button
+                v-if="wb.showViewAllDueButton"
+                class="wrong-due-notice-btn"
+                size="small"
+                type="warning"
+                plain
+                @click="wb.showAllDueQuestions"
+              >
+                查看全库到期
+              </el-button>
+            </div>
             <p class="wrong-list-topic">
               当前知识点：<strong>{{ wb.selectedLearningTypeName }}</strong>
             </p>
@@ -184,8 +221,8 @@ const onTreeSelect = (id: number | null) => {
                   type="primary"
                   :disabled="
                     !wb.selectedLearningTypeId ||
-                    (!wb.wrongBookTestQuestionBanks.length &&
-                      !wb.wrongBookTestPresetUnits.length)
+                    wb.filteredWrongRows.length === 0 ||
+                    !wb.wrongBookTestBankLookup.length
                   "
                   @click="wb.openWrongBookTest"
                 >
@@ -199,14 +236,27 @@ const onTreeSelect = (id: number | null) => {
           </div>
           <p v-if="wb.loading">加载中...</p>
           <p v-else-if="!wb.loading && wb.message">{{ wb.message }}</p>
-          <p v-if="!wb.loading && !wb.selectedLearningTypeId">请先从左侧树中选择知识点。</p>
-          <div v-else-if="!wb.loading && wb.filteredWrongRows.length === 0" class="wrong-empty-block">
+          <p v-if="!wb.loading && !wb.selectedLearningTypeId">请先从左侧树中选择学习类型。</p>
+          <template v-else-if="!wb.loading && wb.selectedLearningTypeId">
+          <p v-if="wb.isParentNodeSelected" class="parent-node-hint">
+            {{
+              wb.WRONG_BOOK_UI.parentHint(
+                wb.descendantLeafNodes.length,
+                wb.filteredWrongRows.length,
+              )
+            }}
+          </p>
+          <div v-if="wb.filteredWrongRows.length === 0" class="wrong-empty-block">
             <p>当前条件下暂无错题。</p>
             <el-button v-if="wb.trashRows.length > 0" type="primary" plain @click="wb.showTrashPanel = true">
               打开回收站恢复删除
             </el-button>
           </div>
-          <div v-else-if="!wb.loading" class="wrong-table">
+          <div
+            v-else
+            class="wrong-table"
+            :class="{ 'wrong-table--tree': wb.isParentNodeSelected }"
+          >
             <div class="wrong-table-head">
               <span class="cell-check">
                 <el-checkbox
@@ -215,8 +265,9 @@ const onTreeSelect = (id: number | null) => {
                   @change="wb.toggleSelectAllOnPage"
                 />
               </span>
-              <span>题目</span>
-              <span>题型</span>
+              <span>名称</span>
+              <span>类型</span>
+              <span>{{ wb.WRONG_BOOK_UI.scoreColumn }}</span>
               <button
                 type="button"
                 class="cell-sortable"
@@ -245,37 +296,111 @@ const onTreeSelect = (id: number | null) => {
               <span>操作</span>
             </div>
             <div class="wrong-table-body">
-              <div
-                v-for="row in wb.paginatedWrongRows"
-                :key="row.id"
-                class="wrong-table-row"
-                role="button"
-                tabindex="0"
-                @click="wb.openRow(row)"
-                @keydown.enter.prevent="wb.openRow(row)"
-                @keydown.space.prevent="wb.openRow(row)"
-              >
-                <span class="cell-check" @click.stop>
-                  <el-checkbox
-                    :model-value="row.id != null && wb.selectedRowIds.includes(row.id)"
-                    @change="wb.toggleRowSelect(row.id)"
-                  />
-                </span>
-                <span class="cell-title" :title="wb.rowDisplayTitle(row)">
-                  {{ wb.rowDisplayTitle(row) }}
-                </span>
-                <span>{{ wb.rowTypeLabel(row) }}</span>
-                <span>{{ row.wrongCount }}</span>
-                <span>{{ wb.rowReviewStageLabel(row.reviewStage) }}</span>
-                <span class="cell-next-review">
-                  <em>{{ wb.rowDueTag(row) }}</em> · {{ wb.formatTime(row.nextReviewAt) }}
-                </span>
-                <div class="cell-actions" @click.stop>
-                  <el-button type="danger" link @click="wb.removeRow(row.id)">删除</el-button>
+              <template v-if="wb.isParentNodeSelected">
+                <template
+                  v-for="(treeRow, idx) in wb.parentTreeTableRows"
+                  :key="wb.rowKeyForTreeRow(treeRow, idx)"
+                >
+                  <div
+                    v-if="treeRow.kind === 'branch'"
+                    class="wrong-tree-branch"
+                    :class="{ 'is-expanded': wb.isTreeBranchExpanded(treeRow.branchId) }"
+                    :style="{ '--wb-tree-depth': treeRow.depth }"
+                    role="button"
+                    tabindex="0"
+                    :aria-expanded="wb.isTreeBranchExpanded(treeRow.branchId)"
+                    @click="wb.toggleTreeBranch(treeRow.branchId)"
+                    @keydown.enter.prevent="wb.toggleTreeBranch(treeRow.branchId)"
+                    @keydown.space.prevent="wb.toggleTreeBranch(treeRow.branchId)"
+                  >
+                    <span class="wrong-tree-chevron" aria-hidden="true">{{
+                      wb.isTreeBranchExpanded(treeRow.branchId) ? '▼' : '▶'
+                    }}</span>
+                    <span class="wrong-tree-branch-label">{{ treeRow.node.name }}</span>
+                    <span
+                      v-if="
+                        !wb.isTreeBranchExpanded(treeRow.branchId) &&
+                        treeRow.descendantCount > 0
+                      "
+                      class="wrong-tree-branch-meta"
+                    >
+                      {{ treeRow.descendantCount }} 条
+                    </span>
+                  </div>
+                  <div
+                    v-else
+                    class="wrong-table-row wrong-table-row--tree-entry"
+                    :style="{ '--wb-tree-depth': treeRow.depth }"
+                    role="button"
+                    tabindex="0"
+                    @click="wb.openRow(treeRow.item)"
+                    @keydown.enter.prevent="wb.openRow(treeRow.item)"
+                    @keydown.space.prevent="wb.openRow(treeRow.item)"
+                  >
+                    <span class="cell-check" @click.stop>
+                      <el-checkbox
+                        :model-value="
+                          treeRow.item.id != null && wb.selectedRowIds.includes(treeRow.item.id)
+                        "
+                        @change="wb.toggleRowSelect(treeRow.item.id)"
+                      />
+                    </span>
+                    <span class="cell-title" :title="wb.rowDisplayTitle(treeRow.item)">
+                      {{ wb.rowDisplayTitle(treeRow.item) }}
+                    </span>
+                    <span>{{ wb.rowTypeLabel(treeRow.item) }}</span>
+                    <span>{{ wb.rowScoreDisplay(treeRow.item) }}</span>
+                    <span>{{ treeRow.item.wrongCount }}</span>
+                    <span>{{ wb.rowReviewStageLabel(treeRow.item.reviewStage) }}</span>
+                    <span class="cell-next-review">
+                      <em>{{ wb.rowDueTag(treeRow.item) }}</em> ·
+                      {{ wb.formatTime(treeRow.item.nextReviewAt) }}
+                    </span>
+                    <div class="cell-actions" @click.stop>
+                      <el-button type="danger" link @click="wb.removeRow(treeRow.item.id)">
+                        删除
+                      </el-button>
+                    </div>
+                  </div>
+                </template>
+              </template>
+              <template v-else>
+                <div
+                  v-for="row in wb.paginatedWrongRows"
+                  :key="row.id"
+                  class="wrong-table-row"
+                  role="button"
+                  tabindex="0"
+                  @click="wb.openRow(row)"
+                  @keydown.enter.prevent="wb.openRow(row)"
+                  @keydown.space.prevent="wb.openRow(row)"
+                >
+                  <span class="cell-check" @click.stop>
+                    <el-checkbox
+                      :model-value="row.id != null && wb.selectedRowIds.includes(row.id)"
+                      @change="wb.toggleRowSelect(row.id)"
+                    />
+                  </span>
+                  <span class="cell-title" :title="wb.rowDisplayTitle(row)">
+                    {{ wb.rowDisplayTitle(row) }}
+                  </span>
+                  <span>{{ wb.rowTypeLabel(row) }}</span>
+                  <span>{{ wb.rowScoreDisplay(row) }}</span>
+                  <span>{{ row.wrongCount }}</span>
+                  <span>{{ wb.rowReviewStageLabel(row.reviewStage) }}</span>
+                  <span class="cell-next-review">
+                    <em>{{ wb.rowDueTag(row) }}</em> · {{ wb.formatTime(row.nextReviewAt) }}
+                  </span>
+                  <div class="cell-actions" @click.stop>
+                    <el-button type="danger" link @click="wb.removeRow(row.id)">删除</el-button>
+                  </div>
                 </div>
-              </div>
+              </template>
             </div>
-            <div class="wrong-pagination-bar">
+            <div v-if="wb.isParentNodeSelected" class="wrong-tree-total-bar">
+              共 {{ wb.filteredWrongRows.length }} 条错题
+            </div>
+            <div v-else class="wrong-pagination-bar">
               <el-pagination
                 v-model:current-page="wb.currentPage"
                 v-model:page-size="wb.pageSize"
@@ -288,6 +413,7 @@ const onTreeSelect = (id: number | null) => {
             </div>
           </div>
           </template>
+          </template>
         </section>
       </div>
     </template>
@@ -295,9 +421,23 @@ const onTreeSelect = (id: number | null) => {
 </template>
 
 <style scoped>
-.wrong-book-page {
+.wrong-book-page:not(.is-detail-view) {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+}
+
+.wrong-book-page.is-detail-view {
   display: grid;
   gap: 12px;
+}
+
+.page-hero {
+  flex-shrink: 0;
 }
 
 .wrong-book-page.is-detail-view {
@@ -340,11 +480,37 @@ const onTreeSelect = (id: number | null) => {
 }
 
 .wrong-book-layout {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: 420px 1fr;
   gap: 12px;
-  align-items: start;
-  height: calc(100vh - 230px);
+  align-items: stretch;
+  overflow: hidden;
+  --wb-tree-indent: calc(var(--app-handout-font-size, 14px) * 1.15);
+  font-size: var(--app-handout-font-size, 14px);
+  line-height: var(--app-handout-line-height, 1.65);
+}
+
+.wrong-book-layout :deep(.type-panel .node-label) {
+  font-size: calc(var(--app-handout-font-size, 14px) * 0.9);
+}
+
+.wrong-book-layout :deep(.type-panel .node-label-level-1) {
+  font-size: calc(var(--app-handout-font-size, 14px) * 1.42);
+}
+
+.wrong-book-layout :deep(.type-panel .node-label-level-2) {
+  font-size: calc(var(--app-handout-font-size, 14px) * 1.12);
+}
+
+.wrong-book-layout :deep(.type-panel .el-tree-node__content) {
+  min-height: calc(var(--app-handout-font-size, 14px) * 2.35);
+}
+
+.parent-node-hint {
+  margin: 0 0 10px;
+  color: var(--app-text-muted);
 }
 
 .wrong-list-panel {
@@ -366,10 +532,75 @@ const onTreeSelect = (id: number | null) => {
   border-bottom: 1px solid var(--app-border-soft);
 }
 
+.wrong-due-notice-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.wrong-due-notice-main {
+  flex: 1 1 240px;
+  display: grid;
+  gap: 8px;
+}
+
+.wrong-due-outside-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 0 2px;
+}
+
+.wrong-due-outside-links__label {
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.wrong-due-outside-link {
+  margin: 0;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--el-color-warning) 40%, var(--app-border-soft));
+  border-radius: 999px;
+  background: var(--app-surface);
+  color: var(--app-text);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.wrong-due-outside-link:hover {
+  border-color: color-mix(in srgb, var(--el-color-warning) 65%, var(--app-border-soft));
+  background: color-mix(in srgb, var(--el-color-warning-light-9) 70%, var(--app-surface));
+}
+
+.wrong-due-notice-btn {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.wrong-due-notice {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--el-color-info) 35%, var(--app-border-soft));
+  background: color-mix(in srgb, var(--el-color-info-light-9) 75%, var(--app-surface));
+  color: var(--app-text-muted);
+  font-size: calc(var(--app-handout-font-size, 14px) * 0.92);
+  line-height: 1.5;
+}
+
+.wrong-due-notice--action {
+  border-color: color-mix(in srgb, var(--el-color-warning) 45%, var(--app-border-soft));
+  background: color-mix(in srgb, var(--el-color-warning-light-9) 82%, var(--app-surface));
+  color: var(--app-text);
+  font-weight: 600;
+}
+
 .wrong-list-topic {
   margin: 0;
-  font-size: 14px;
-  line-height: 1.5;
 }
 
 .wrong-toolbar {
@@ -411,14 +642,11 @@ const onTreeSelect = (id: number | null) => {
 }
 
 .wrong-toolbar-label {
-  font-size: 13px;
   color: var(--app-text-muted);
   white-space: nowrap;
 }
 
 .wrong-toolbar :deep(.wrong-toolbar-btn) {
-  height: 32px;
-  padding: 0 14px;
   margin: 0;
   border-radius: 6px;
 }
@@ -428,7 +656,7 @@ const onTreeSelect = (id: number | null) => {
 }
 
 .wrong-toolbar :deep(.wrong-toolbar-input .el-input__wrapper) {
-  min-height: 32px;
+  min-height: var(--learning-list-btn-height, 32px);
   border-radius: 6px;
 }
 
@@ -441,9 +669,6 @@ const onTreeSelect = (id: number | null) => {
   height: 22px;
 }
 
-.wrong-toolbar :deep(.el-switch__label) {
-  font-size: 12px;
-}
 
 @media (max-width: 900px) {
   .wrong-toolbar-divider {
@@ -485,10 +710,67 @@ const onTreeSelect = (id: number | null) => {
 .wrong-table-head,
 .wrong-table-row {
   display: grid;
-  grid-template-columns: 42px minmax(260px, 1.8fr) 110px 92px 112px minmax(230px, 1fr) 120px;
+  grid-template-columns: 42px minmax(220px, 1.6fr) 100px 72px 92px 112px minmax(200px, 1fr) 72px;
   gap: 10px;
   align-items: center;
   padding: 10px 12px;
+}
+
+.wrong-tree-branch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px 9px calc(12px + var(--wb-tree-depth, 0) * var(--wb-tree-indent));
+  font-weight: 600;
+  font-size: calc(var(--app-handout-font-size, 14px) * 1.02);
+  color: var(--app-text);
+  background: var(--app-surface-alt);
+  border-bottom: 1px solid var(--app-border-soft);
+  cursor: pointer;
+  user-select: none;
+}
+
+.wrong-tree-branch:hover {
+  background: color-mix(in srgb, var(--app-surface-alt) 88%, var(--app-primary-soft));
+}
+
+.wrong-tree-branch.is-expanded {
+  background: color-mix(in srgb, var(--app-primary-soft) 55%, var(--app-surface-alt));
+}
+
+.wrong-tree-chevron {
+  flex-shrink: 0;
+  width: 1.1em;
+  font-size: 0.72em;
+  line-height: 1;
+  color: var(--app-text-muted);
+}
+
+.wrong-tree-branch-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.wrong-tree-branch-meta {
+  flex-shrink: 0;
+  font-size: 0.86em;
+  font-weight: 500;
+  color: var(--app-text-muted);
+}
+
+.wrong-table-row--tree-entry {
+  padding-left: calc(12px + var(--wb-tree-depth, 0) * var(--wb-tree-indent));
+}
+
+.wrong-tree-total-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 12px;
+  border-top: 1px solid var(--app-border-soft);
+  flex-shrink: 0;
+  background: var(--app-surface);
+  font-size: 13px;
+  color: var(--app-text-muted);
 }
 
 .wrong-table-head {
@@ -572,7 +854,6 @@ const onTreeSelect = (id: number | null) => {
 
 .cell-next-review {
   color: var(--app-text-muted);
-  font-size: 13px;
 }
 
 .cell-next-review em {
@@ -595,6 +876,7 @@ const onTreeSelect = (id: number | null) => {
   border-top: 1px solid var(--app-border-soft);
   flex-shrink: 0;
   background: var(--app-surface);
+  font-size: inherit;
 }
 </style>
 

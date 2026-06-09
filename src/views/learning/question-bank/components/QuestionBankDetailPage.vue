@@ -64,7 +64,6 @@ onUnmounted(() => {
         class="detail-column-aside"
         :question="question"
         :type-label="typeLabel"
-        :fill-height="isMindmap"
       />
     </div>
   </section>
@@ -110,17 +109,19 @@ onUnmounted(() => {
 
 .detail-column-aside {
   flex: 0 0 min(32vw, 340px);
-  align-self: flex-start;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
 }
 
 .detail-column-aside :deep(.keyword-panel) {
-  max-width: none;
-  width: 100%;
-}
-
-.question-detail-page.is-mindmap-detail .detail-column-aside :deep(.keyword-panel) {
   flex: 1 1 auto;
   min-height: 0;
+  max-width: none;
+  width: 100%;
 }
 
 @media (max-width: 900px) {
@@ -131,10 +132,12 @@ onUnmounted(() => {
   .detail-column-aside {
     flex: 0 0 auto;
     width: 100%;
+    max-height: min(52dvh, 420px);
   }
 
   .detail-column-aside :deep(.keyword-panel) {
     max-width: none;
+    max-height: 100%;
   }
 }
 
@@ -150,15 +153,6 @@ onUnmounted(() => {
 .question-detail-page.is-mindmap-detail .detail-page-columns {
   flex: 1 1 auto;
   min-height: 0;
-}
-
-.question-detail-page.is-mindmap-detail .detail-column-aside {
-  align-self: stretch;
-  display: flex;
-  flex-direction: column;
-  max-height: 100%;
-  min-height: 0;
-  overflow: hidden;
 }
 
 .question-detail-page.is-mindmap-detail :deep(.detail-topbar) {

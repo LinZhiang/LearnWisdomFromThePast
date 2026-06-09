@@ -26,6 +26,8 @@ const props = withDefaults(
     selectedItem?: LearningType
     /** 已在学习题库「测试全部」中整库全对的学习类型 id（用于叶子节点标记） */
     perfectClearedIds?: number[]
+    /** 各节点子树内到期错题数（错题本左侧树角标） */
+    nodeDueCounts?: Record<number, number>
     /** 学习类型编辑页：略放大字号、统一字重与主题字色，便于长时间编辑 */
     typeEditTree?: boolean
   }>(),
@@ -40,6 +42,7 @@ const props = withDefaults(
     editId: null,
     selectedItem: undefined,
     perfectClearedIds: () => [],
+    nodeDueCounts: () => ({}),
     typeEditTree: false,
   },
 )
@@ -159,6 +162,15 @@ watch(
             >
               {{ data.name }}
               <el-tag
+                v-if="data.id && (nodeDueCounts[data.id] ?? 0) > 0"
+                class="node-due-tag"
+                type="warning"
+                size="small"
+                effect="plain"
+              >
+                {{ nodeDueCounts[data.id] }}
+              </el-tag>
+              <el-tag
                 v-if="
                   data.id &&
                   data.children.length === 0 &&
@@ -216,13 +228,16 @@ watch(
 <style scoped>
 /* 与顶栏、主内容区一致：衬底走 app-shell 上的 --app-surface（随「顶栏与内容面板透明度」联动） */
 .type-panel {
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--app-border-soft);
   border-radius: 10px;
   padding: 12px;
   background: var(--app-surface);
   min-height: 0;
   height: 100%;
-  overflow: auto;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .type-form :deep(.el-input__wrapper) {
@@ -232,6 +247,7 @@ watch(
 }
 
 .type-form {
+  flex-shrink: 0;
   display: grid;
   gap: 12px;
   margin-bottom: 10px;
@@ -257,10 +273,15 @@ watch(
 }
 
 .type-tree-list {
+  flex: 1 1 auto;
   min-height: 0;
-  overflow: auto;
+  margin-right: -12px;
+  padding: 8px 12px 0 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
   border-top: 1px solid var(--app-border-soft);
-  padding-top: 8px;
 }
 
 /* 与页面主题字色一致，避免深色主题下仍用偏暗的 --el-text-color-regular 导致看不清 */
@@ -299,7 +320,8 @@ watch(
   color: var(--app-text);
 }
 
-.perfect-cleared-tag {
+.perfect-cleared-tag,
+.node-due-tag {
   flex-shrink: 0;
 }
 

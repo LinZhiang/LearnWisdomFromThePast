@@ -60,6 +60,13 @@ function pickRandomTrackId(candidates: { id: string }[], excludeId: string): str
 let audio: HTMLAudioElement | null = null
 let tickTimer: ReturnType<typeof setInterval> | null = null
 let globalListenersAttached = false
+/** 换曲 / 暂停 / 改 src 时忽略误触发的 ended */
+let suppressEndedAdvance = 0
+/** 当前正在播放的曲目 id（用于忽略上一首残留的 ended） */
+let playingTrackId: string | null = null
+
+const END_REMAINING_TOLERANCE_SEC = 1.5
+const MIN_PLAYED_SEC_WITHOUT_DURATION = 0.75
 
 function getAudio(): HTMLAudioElement {
   if (!audio) {
@@ -67,6 +74,61 @@ function getAudio(): HTMLAudioElement {
     audio.preload = 'auto'
   }
   return audio
+}
+
+function resolveTrackUrl(trackUrl: string): string {
+  try {
+    return new URL(trackUrl, document.baseURI || window.location.href).href
+  } catch {
+    return trackUrl
+  }
+}
+
+function trackUrlsEqual(el: HTMLAudioElement, trackUrl: string): boolean {
+  if (!trackUrl) return false
+  const resolved = resolveTrackUrl(trackUrl)
+  return el.src === resolved || el.src === trackUrl
+}
+
+/** 避免元数据偏短导致 ended 提前触发就切歌 */
+function isPlaybackNaturallyComplete(el: HTMLAudioElement): boolean {
+  const played = el.currentTime
+  if (!Number.isFinite(played) || played < MIN_PLAYED_SEC_WITHOUT_DURATION) {
+    return false
+  }
+  const duration = el.duration
+  if (!Number.isFinite(duration) || duration <= 0) {
+    return played >= MIN_PLAYED_SEC_WITHOUT_DURATION
+  }
+  const remaining = duration - played
+  return remaining <= END_REMAINING_TOLERANCE_SEC || played / duration >= 0.985
+}
+
+function waitForAudioCanPlay(el: HTMLAudioElement): Promise<void> {
+  if (el.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
+    return Promise.resolve()
+  }
+  return new Promise((resolve) => {
+    const timeout = window.setTimeout(() => {
+      cleanup()
+      resolve()
+    }, 20_000)
+    const onReady = () => {
+      cleanup()
+      resolve()
+    }
+    const onError = () => {
+      cleanup()
+      resolve()
+    }
+    const cleanup = () => {
+      clearTimeout(timeout)
+      el.removeEventListener('canplay', onReady)
+      el.removeEventListener('error', onError)
+    }
+    el.addEventListener('canplay', onReady, { once: true })
+    el.addEventListener('error', onError, { once: true })
+  })
 }
 
 function stopBillingTick(): void {
@@ -227,22 +289,51 @@ export const useBackgroundMusicStore = defineStore('background-music', () => {
       return false
     }
     const el = getAudio()
-    if (el.src !== track.url) {
-      el.src = track.url
-    }
-    selectedTrackId.value = trackId
-    persistPrefs()
+    const sameResolvedUrl = trackUrlsEqual(el, track.url)
+
+    suppressEndedAdvance += 1
     try {
+      if (!sameResolvedUrl) {
+        el.pause()
+        el.src = track.url
+        await waitForAudioCanPlay(el)
+      }
+      selectedTrackId.value = trackId
+      playingTrackId = trackId
+      persistPrefs()
+      try {
+        await el.play()
+        isPlaying.value = true
+        miniPlayerOpen.value = true
+        startBgmBillingTimer()
+        startBillingTick()
+        refreshBilling()
+        return true
+      } catch {
+        playingTrackId = null
+        ElMessage.error('无法播放该音频，请检查文件格式或浏览器权限')
+        return false
+      }
+    } finally {
+      suppressEndedAdvance = Math.max(0, suppressEndedAdvance - 1)
+    }
+  }
+
+  async function replayCurrentTrackFromStart(): Promise<boolean> {
+    const trackId = selectedTrackId.value
+    if (!trackId) return false
+    const el = getAudio()
+    suppressEndedAdvance += 1
+    try {
+      el.currentTime = 0
+      playingTrackId = trackId
       await el.play()
       isPlaying.value = true
-      miniPlayerOpen.value = true
-      startBgmBillingTimer()
-      startBillingTick()
-      refreshBilling()
       return true
     } catch {
-      ElMessage.error('无法播放该音频，请检查文件格式或浏览器权限')
       return false
+    } finally {
+      suppressEndedAdvance = Math.max(0, suppressEndedAdvance - 1)
     }
   }
 
@@ -284,8 +375,13 @@ export const useBackgroundMusicStore = defineStore('background-music', () => {
     pauseBgmBillingTimer()
     refreshBilling()
     const el = getAudio()
+    suppressEndedAdvance += 1
     el.pause()
     isPlaying.value = false
+    playingTrackId = null
+    window.setTimeout(() => {
+      suppressEndedAdvance = Math.max(0, suppressEndedAdvance - 1)
+    }, 0)
   }
 
   async function togglePlayback(): Promise<void> {
@@ -333,10 +429,34 @@ export const useBackgroundMusicStore = defineStore('background-music', () => {
   }
 
   function onAudioEnded(): void {
+    if (suppressEndedAdvance > 0) return
+
+    const el = getAudio()
+    const cur = selectedTrackId.value
+    if (!cur || !isPlaying.value) return
+    if (playingTrackId != null && playingTrackId !== cur) return
+
+    if (!isPlaybackNaturallyComplete(el)) {
+      void el.play().catch(() => {
+        lastError.value = '当前曲目未播完就中断，已尝试续播；若仍失败请换一首或检查文件'
+      })
+      return
+    }
+
     const nextId = pickNextTrackId(false)
     if (!nextId) return
+
     void (async () => {
-      const cur = selectedTrackId.value
+      if (playMode.value === 'loop' && nextId === cur) {
+        if (!(await assertCanStartPlayback())) {
+          await pausePlayback()
+          return
+        }
+        const ok = await replayCurrentTrackFromStart()
+        if (!ok) await pausePlayback()
+        return
+      }
+
       if (cur && nextId !== cur) pushPlayHistory(cur)
       if (!(await assertCanStartPlayback())) {
         await pausePlayback()
@@ -347,18 +467,30 @@ export const useBackgroundMusicStore = defineStore('background-music', () => {
     })()
   }
 
+  function onAudioError(): void {
+    if (suppressEndedAdvance > 0) return
+    lastError.value = '音频加载或播放失败，请换一首或检查文件是否完整'
+    void pausePlayback()
+  }
+
   function initAudioEndedHandler(): void {
     const el = getAudio()
     el.onended = () => onAudioEnded()
+    el.onerror = () => onAudioError()
   }
 
   function setSelectedTrackId(id: string | null): void {
-    if (id !== selectedTrackId.value) {
+    const prev = selectedTrackId.value
+    if (id !== prev) {
       playHistory.value = []
     }
     selectedTrackId.value = id
     persistPrefs()
     if (isPlaying.value && id) {
+      const trackUrl = getMusicTrackById(id)?.url ?? ''
+      if (id === prev && trackUrlsEqual(getAudio(), trackUrl)) {
+        return
+      }
       void loadAndPlayTrack(id)
     }
   }

@@ -20,4 +20,21 @@ export default defineConfig({
       'jazz-midi': fileURLToPath(new URL('./src/utils/jazz-midi-stub.ts', import.meta.url)),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return
+          if (id.includes('element-plus')) return 'element-plus'
+          if (id.includes('echarts')) return 'echarts-radar'
+          if (id.includes('tesseract.js')) return 'tesseract'
+          if (id.includes('mammoth')) return 'mammoth'
+          if (id.includes('markmap')) return 'markmap'
+          if (id.includes('@vueup/vue-quill') || id.includes('/quill/')) return 'quill'
+          if (id.includes('jzz')) return 'jzz'
+          if (id.includes('katex')) return 'katex'
+        },
+      },
+    },
+  },
 })

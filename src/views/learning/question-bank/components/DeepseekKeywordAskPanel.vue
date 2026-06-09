@@ -1,25 +1,42 @@
 <script setup lang="ts">
 import { ElMessage } from 'element-plus'
-import DOMPurify from 'dompurify'
-import { marked } from 'marked'
 import { computed, ref } from 'vue'
 import type { QuestionBank } from '@/db/models'
-import { isAiChatConfigured, requestQuestionKeywordFollowup } from '@/services/deepseek'
-import { hashForAiCache, rememberAiResponse } from '@/utils/aiResponseCache'
+import { useDeepseekConversation } from '@/composables/useDeepseekConversation'
+import {
+  buildKeywordFollowupUserMessage,
+  isAiChatConfigured,
+  KEYWORD_FOLLOWUP_SYSTEM,
+  requestQuestionKeywordFollowup,
+} from '@/services/deepseek'
+import { hashForAiCache } from '@/utils/aiResponseCache'
 import { parseChoiceQuestionContent } from '@/utils/choiceQuestion'
+import { prepareHandoutBodyForKeywordFollowup } from '@/utils/handoutAiMaterial'
 import { htmlToPlainText } from '@/utils/htmlToText'
+import DeepseekChatThread from './DeepseekChatThread.vue'
 
 const props = defineProps<{
   question: QuestionBank
   typeLabel: string
-  /** 思维导图详情等场景：侧栏撑满高度，仅「回答」区滚动，避免双层滚动条 */
-  fillHeight?: boolean
 }>()
 
 const keywordInput = ref('')
-const loading = ref(false)
-const answer = ref('')
-const error = ref('')
+
+const contextKey = computed(
+  () => `${props.question.id ?? 'x'}:${props.typeLabel}:${hashForAiCache(props.question.content ?? '')}`,
+)
+
+const {
+  loading,
+  error,
+  hasStarted,
+  displayTurns,
+  reset,
+  start,
+  followup,
+} = useDeepseekConversation({
+  resetKey: contextKey,
+})
 
 const hasAiProxy = computed(() => isAiChatConfigured())
 
@@ -29,9 +46,9 @@ const materialPlain = computed(() => {
   const t = q.type ?? 'general'
 
   if (t === 'mindmap') {
-    const md = (q.content ?? '').trim()
+    const md = prepareHandoutBodyForKeywordFollowup(q.content ?? '')
     const parts: string[] = []
-    if (title) parts.push(`题目名称：${title}`)
+    if (title) parts.push(`名称：${title}`)
     if (md) parts.push(`思维导图正文（Markdown）：\n${md}`)
     return parts.join('\n\n')
   }
@@ -43,19 +60,29 @@ const materialPlain = computed(() => {
     const answersBlock = answers.length ? answers.map((a, i) => `${i + 1}. ${a}`).join('\n') : '（未填写）'
     const analysis = htmlToPlainText(q.analysis ?? '')
     const parts: string[] = []
-    if (title) parts.push(`题目名称：${title}`)
+    if (title) parts.push(`名称：${title}`)
     parts.push(`选项类型：${modeLabel}`)
     parts.push(`已知正确选项：\n${answersBlock}`)
-    if (analysis) parts.push(`题目解析：\n${analysis}`)
+    if (analysis) parts.push(`解析：\n${analysis}`)
     return parts.join('\n\n')
   }
 
   const content = htmlToPlainText(q.content ?? '')
   const analysis = htmlToPlainText(q.analysis ?? '')
   const parts: string[] = []
-  if (title) parts.push(`题目名称：${title}`)
-  if (content) parts.push(`题目内容：\n${content}`)
-  if (analysis) parts.push(`题目解析：\n${analysis}`)
+  if (title) parts.push(`名称：${title}`)
+  if (t === 'handout') {
+    const raw = (q.content ?? '').trim()
+    const normalized =
+      raw.startsWith('<') && raw.includes('>')
+        ? htmlToPlainText(raw).replace(/\s+/g, '\n').trim() || raw
+        : raw
+    const body = prepareHandoutBodyForKeywordFollowup(normalized)
+    if (body) parts.push(`讲义正文：\n${body}`)
+    return parts.join('\n\n')
+  }
+  if (content) parts.push(`题干与材料：\n${content}`)
+  if (analysis) parts.push(`解析：\n${analysis}`)
   return parts.join('\n\n')
 })
 
@@ -63,57 +90,58 @@ const canSubmit = computed(
   () => hasAiProxy.value && keywordInput.value.trim().length > 0 && !loading.value,
 )
 
-const answerHtml = computed(() => {
-  const md = answer.value.trim()
-  if (!md) return ''
-  const raw = marked.parse(md, { async: false })
-  if (typeof raw !== 'string') return ''
-  return DOMPurify.sanitize(raw, { USE_PROFILES: { html: true } })
-})
+const askButtonLabel = computed(() => (hasStarted.value ? '继续追问' : '向 DeepSeek 提问'))
 
 const onAsk = async () => {
-  error.value = ''
-  loading.value = true
+  const text = keywordInput.value.trim()
+  if (!text) return
   try {
-    answer.value = await rememberAiResponse(
-      `keyword:${props.question.id ?? 'x'}:${hashForAiCache(
-        [props.typeLabel, materialPlain.value, keywordInput.value.trim()].join('\0'),
-      )}`,
-      () =>
-        requestQuestionKeywordFollowup({
-          typeLabel: props.typeLabel,
-          title: props.question.title ?? '',
-          materialPlainText: materialPlain.value,
-          userKeywords: keywordInput.value,
-        }),
-    )
+    if (!hasStarted.value) {
+      const initialUser = buildKeywordFollowupUserMessage({
+        typeLabel: props.typeLabel,
+        title: props.question.title ?? '',
+        materialPlainText: materialPlain.value,
+        userKeywords: text,
+      })
+      await start({
+        initialUser,
+        displayUser: text,
+        system: KEYWORD_FOLLOWUP_SYSTEM,
+        cacheKey: `keyword:v4:${props.question.id ?? 'x'}:${hashForAiCache(
+          [props.typeLabel, materialPlain.value, text].join('\0'),
+        )}`,
+        fetch: () =>
+          requestQuestionKeywordFollowup({
+            typeLabel: props.typeLabel,
+            title: props.question.title ?? '',
+            materialPlainText: materialPlain.value,
+            userKeywords: text,
+          }),
+      })
+    } else {
+      await followup(text)
+    }
+    keywordInput.value = ''
   } catch (e) {
-    const msg = e instanceof Error ? e.message : '请求失败'
-    error.value = msg
-    ElMessage.error(msg)
-  } finally {
-    loading.value = false
+    ElMessage.error(e instanceof Error ? e.message : '请求失败')
   }
+}
+
+const onReset = () => {
+  reset()
+  keywordInput.value = ''
 }
 </script>
 
 <template>
-  <aside
-    class="keyword-panel"
-    :class="{ 'keyword-panel--fill': fillHeight }"
-    aria-label="DeepSeek 关键字追问"
-  >
+  <aside class="keyword-panel" aria-label="DeepSeek 关键字追问">
     <header class="keyword-panel-head">
       <h3 class="keyword-panel-title">DeepSeek 关键字追问</h3>
       <p class="keyword-panel-desc">
-        结合本题材料，输入你想了解的关键词或一句话问题，由 DeepSeek 针对性说明。
+        结合本题材料提问；首次提问后可继续追问，对话会保留在本题上下文中。
       </p>
     </header>
-    <div
-      class="keyword-panel-main"
-      :tabindex="fillHeight ? undefined : -1"
-      :aria-label="fillHeight ? undefined : '关键字追问与回答'"
-    >
+    <div class="keyword-panel-main">
       <div class="keyword-panel-form">
         <el-input
           v-model="keywordInput"
@@ -122,26 +150,36 @@ const onAsk = async () => {
           resize="none"
           maxlength="500"
           show-word-limit
-          placeholder="例如：易错点、核心概念、与解析的差异…"
+          :placeholder="
+            hasStarted
+              ? '继续追问，例如：能再举一个反例吗？'
+              : '例如：易错点、核心概念、与解析的差异…'
+          "
           class="keyword-textarea"
+          @keydown.ctrl.enter="onAsk"
         />
-        <el-tooltip
-          :disabled="hasAiProxy"
-          placement="top"
-          content="开发：在 server/.env 配置 DEEPSEEK_API_KEY 并运行 npm run dev:api；生产：配置 VITE_AI_API_BASE。详见 docs/ENV-说明.md"
-        >
-          <span class="keyword-btn-wrap">
-            <el-button type="primary" plain :loading="loading" :disabled="!canSubmit" @click="onAsk">
-              向 DeepSeek 提问
-            </el-button>
-          </span>
-        </el-tooltip>
+        <div class="keyword-panel-actions">
+          <el-tooltip
+            :disabled="hasAiProxy"
+            placement="top"
+            content="开发：在 server/.env 配置 DEEPSEEK_API_KEY 并运行 npm run dev:api；生产：配置 VITE_AI_API_BASE。详见 docs/ENV-说明.md"
+          >
+            <span class="keyword-btn-wrap">
+              <el-button type="primary" plain :loading="loading" :disabled="!canSubmit" @click="onAsk">
+                {{ askButtonLabel }}
+              </el-button>
+            </span>
+          </el-tooltip>
+          <el-button v-if="hasStarted" text type="info" :disabled="loading" @click="onReset">
+            重新开始
+          </el-button>
+        </div>
         <p v-if="error" class="keyword-error">{{ error }}</p>
       </div>
-      <div v-if="answerHtml" class="keyword-answer">
-        <h4 class="keyword-answer-title">回答</h4>
-        <!-- eslint-disable-next-line vue/no-v-html -->
-        <div class="keyword-answer-body deepseek-md" v-html="answerHtml" />
+      <div v-if="displayTurns.length" class="keyword-answer" aria-label="DeepSeek 回答">
+        <div class="keyword-answer-inner">
+          <DeepseekChatThread :turns="displayTurns" first-assistant-title="回答" />
+        </div>
       </div>
     </div>
   </aside>
@@ -153,17 +191,16 @@ const onAsk = async () => {
   flex-direction: column;
   width: 100%;
   max-width: 360px;
+  height: 100%;
+  max-height: 100%;
   min-height: 0;
   border: 1px solid var(--app-border-soft);
   border-radius: 12px;
   background: var(--app-surface);
   box-sizing: border-box;
   overflow: hidden;
-}
-
-.keyword-panel--fill {
-  height: 100%;
-  max-height: 100%;
+  font-size: var(--app-handout-font-size, 14px);
+  line-height: var(--app-handout-line-height, 1.65);
 }
 
 .keyword-panel-head {
@@ -175,66 +212,59 @@ const onAsk = async () => {
 
 .keyword-panel-title {
   margin: 0 0 6px;
-  font-size: 14px;
+  font-size: 1em;
   font-weight: 600;
   color: var(--app-text, inherit);
 }
 
 .keyword-panel-desc {
   margin: 0;
-  font-size: 12px;
+  font-size: 0.86em;
   line-height: 1.5;
   color: var(--app-text-muted);
 }
 
 .keyword-panel-main {
-  max-height: min(62dvh, calc(100dvh - 13rem));
-  overflow-x: hidden;
-  overflow-y: auto;
-  padding: 12px 14px 14px;
-  scrollbar-gutter: stable;
-  -webkit-overflow-scrolling: touch;
-}
-
-.keyword-panel--fill .keyword-panel-main {
   flex: 1 1 auto;
   min-height: 0;
-  max-height: none;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  padding: 0;
-}
-
-.keyword-panel--fill .keyword-panel-form {
-  flex-shrink: 0;
-  padding: 12px 14px 10px;
-}
-
-.keyword-panel--fill .keyword-answer {
-  flex: 1 1 auto;
-  min-height: 0;
-  margin-top: 0;
-  border: none;
-  border-top: 1px solid var(--app-border-soft);
-  border-radius: 0;
-  padding: 10px 14px 14px;
-  background: var(--app-surface-alt);
-  overflow-x: hidden;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-  -webkit-overflow-scrolling: touch;
 }
 
 .keyword-panel-form {
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
+  padding: 12px 14px 10px;
+}
+
+.keyword-panel-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.keyword-answer {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border-top: 1px solid var(--app-border-soft);
+  background: var(--app-surface-alt);
+  -webkit-overflow-scrolling: touch;
+}
+
+.keyword-answer-inner {
+  padding: 10px 14px 14px;
+  box-sizing: border-box;
 }
 
 .keyword-textarea :deep(.el-textarea__inner) {
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: 1em;
+  line-height: var(--app-handout-line-height, 1.65);
 }
 
 .keyword-btn-wrap {
@@ -243,76 +273,7 @@ const onAsk = async () => {
 
 .keyword-error {
   margin: 0;
-  font-size: 13px;
+  font-size: 0.93em;
   color: var(--app-danger, #dc2626);
-}
-
-.keyword-answer {
-  margin-top: 12px;
-  border: 1px solid var(--app-border-soft);
-  border-radius: 10px;
-  padding: 10px 12px;
-  background: var(--app-surface-alt);
-}
-
-.keyword-answer-title {
-  margin: 0 0 8px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--app-text-muted);
-}
-
-.keyword-answer-body {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.65;
-  word-break: break-word;
-  color: var(--app-text, inherit);
-}
-
-.deepseek-md :deep(h1),
-.deepseek-md :deep(h2),
-.deepseek-md :deep(h3),
-.deepseek-md :deep(h4) {
-  margin: 1em 0 0.4em;
-  font-weight: 700;
-  line-height: 1.35;
-}
-
-.deepseek-md :deep(p) {
-  margin: 0.5em 0;
-}
-
-.deepseek-md :deep(p:first-child) {
-  margin-top: 0;
-}
-
-.deepseek-md :deep(p:last-child) {
-  margin-bottom: 0;
-}
-
-.deepseek-md :deep(ul),
-.deepseek-md :deep(ol) {
-  margin: 0.45em 0;
-  padding-left: 1.25em;
-}
-
-.deepseek-md :deep(li) {
-  margin: 0.2em 0;
-}
-
-.deepseek-md :deep(pre) {
-  margin: 0.5em 0;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--app-border-soft);
-  background: var(--app-surface, #f8fafc);
-  overflow-x: auto;
-  font-size: 12px;
-}
-
-.deepseek-md :deep(code) {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.9em;
 }
 </style>

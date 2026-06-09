@@ -4,6 +4,7 @@ import type { QuestionBank, WrongQuestion } from '@/db/models'
 import { parseWrongDerivedPayload } from '@/services/wrong-question-helpers'
 import { parseChoiceQuestionContent } from '@/utils/choiceQuestion'
 import { sanitizeRichHtml } from '@/utils/sanitize'
+import PageFocusToggle from '@/components/PageFocusToggle.vue'
 import DeepseekGeneralAssist from '@/views/learning/question-bank/components/DeepseekGeneralAssist.vue'
 
 const props = defineProps<{
@@ -19,9 +20,9 @@ const emit = defineEmits<{
 const safe = (html?: string) => sanitizeRichHtml(html ?? '')
 
 const typeLabel = computed(() => {
-  if (props.row.questionType === 'mindmap-mcq') return '导图衍生小题'
-  if (props.row.questionType === 'choice') return '选择题型'
-  return '一般题型'
+  if (props.row.questionType === 'mindmap-mcq') return '导图选择题'
+  if (props.row.questionType === 'choice') return '选择题'
+  return '作答题'
 })
 
 const derivedPayload = computed(() => parseWrongDerivedPayload(props.row.derivedPayloadJson))
@@ -81,12 +82,15 @@ const formatTime = (iso?: string) => {
           <li class="meta-chip meta-chip-muted">下次复习 {{ formatTime(row.nextReviewAt) }}</li>
         </ul>
       </div>
-      <el-button plain @click="emit('back')">返回列表</el-button>
+      <div class="wrong-detail-actions">
+        <PageFocusToggle variant="stretch" />
+        <el-button plain @click="emit('back')">返回列表</el-button>
+      </div>
     </header>
 
     <div class="wrong-detail-body">
       <div class="detail-section">
-        <h4>题目内容</h4>
+        <h4>题干与材料</h4>
         <template v-if="isChoiceLike">
           <p v-if="row.stem" class="detail-text"><strong>题干：</strong>{{ row.stem }}</p>
           <p v-if="displayCorrectAnswers.length" class="detail-text">
@@ -102,7 +106,7 @@ const formatTime = (iso?: string) => {
             v-html="safe(sourceQuestion.content)"
           />
           <p v-else-if="row.stem" class="detail-text">{{ row.stem }}</p>
-          <p v-else class="detail-text">（暂无题目内容）</p>
+          <p v-else class="detail-text">（暂无题干）</p>
         </template>
       </div>
 
@@ -113,7 +117,7 @@ const formatTime = (iso?: string) => {
       </div>
 
       <div class="detail-section">
-        <h4>题目解析</h4>
+        <h4>解析</h4>
         <!-- eslint-disable-next-line vue/no-v-html -->
         <div v-if="displayAnalysisHtml" class="detail-rich ql-snow ql-editor" v-html="safe(displayAnalysisHtml)" />
         <p v-else class="detail-text">（该题暂无解析）</p>
@@ -139,13 +143,21 @@ const formatTime = (iso?: string) => {
 .wrong-detail-page {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
   gap: 12px;
   width: 100%;
   max-width: 56rem;
   margin: 0 auto;
-  height: calc(100vh - 7.5rem);
-  height: calc(100dvh - 7.5rem);
   overflow: hidden;
+}
+
+.wrong-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 .wrong-detail-topbar {

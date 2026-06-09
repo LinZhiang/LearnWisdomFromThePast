@@ -12,7 +12,8 @@
 |--------|------|------|
 | `VITE_AI_API_BASE` | 生产必填 | AI 代理的 **OpenAI 兼容前缀**，需以 `/v1` 结尾、无尾部斜杠。例如：`https://api.你的域名.com/v1` 或本地 `http://127.0.0.1:8787/v1`。 |
 | `VITE_DEEPSEEK_MODEL_DEFAULT` | 否 | 默认模型（Flash 档），用于测验干扰项、解答、雷达等。默认 `deepseek-v4-flash`。 |
-| `VITE_DEEPSEEK_MODEL_HEAVY` | 否 | 长文生成模型（Pro 档），用于思维导图、资料讲义。默认 `deepseek-v4-pro`。 |
+| `VITE_DEEPSEEK_MODEL_HEAVY` | 否 | 思维导图、资料讲义等长文场景；**默认与 DEFAULT 相同（flash）**。 |
+| `VITE_DEEPSEEK_ALLOW_PRO` | 否 | 设为 `true` 且 HEAVY 配为 pro 时，前端才允许请求 v4-pro；默认 **禁止**。 |
 | （开发可选） | — | 开发时若不设置 `VITE_AI_API_BASE`，请求会走 Vite 代理路径 `/api/ai/...`，转发到本机 `server`（默认端口见下）。 |
 
 **已废弃（请删除）**
@@ -36,6 +37,7 @@
 | `DEEPSEEK_API_BASE` | 否 | 上游地址，默认 `https://api.deepseek.com`（无尾部斜杠）。 |
 | `PORT` | 否 | 监听端口，默认 `8787`。 |
 | `CORS_ORIGIN` | 生产强烈建议 | 允许访问本代理的**前端源**，多个用英文逗号分隔，如 `https://你的站点.com`。不填时开发方便但生产易被滥用，请尽量填写。 |
+| `WENGU_ALLOW_PRO_MODEL` | 否 | 设为 `1` 时代理才转发 v4-pro；默认将本 App（`wengu-learning-app`）的 pro 请求 **降为 flash**。 |
 
 ### API Key 与账单拆分（强烈建议）
 
@@ -45,8 +47,10 @@
 
 | 场景 | 默认模型 |
 |------|----------|
-| 思维导图、资料讲义 | `deepseek-v4-pro`（可通过 `VITE_DEEPSEEK_MODEL_HEAVY` 改） |
-| 测验干扰项、导图小题、解答、雷达等 | `deepseek-v4-flash`（可通过 `VITE_DEEPSEEK_MODEL_DEFAULT` 改） |
+| **全部本 App AI 功能**（含思维导图、资料讲义、测验、解答等） | `deepseek-v4-flash` |
+| 使用 v4-pro | 默认 **关闭**；需前端 `VITE_DEEPSEEK_ALLOW_PRO=true` + 服务端 `WENGU_ALLOW_PRO_MODEL=1` + 显式配置 HEAVY |
+
+若控制台仍出现大量 v4-pro，而 `npm run check:ai` 显示几乎全是 flash，说明 **API Key 被 Cursor 或其它工具共用**，请换独立 Key。
 
 ---
 

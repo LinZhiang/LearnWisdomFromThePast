@@ -1,4 +1,5 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import type {
   FavoriteDerivedMcqPayload,
   LearningType,
@@ -14,11 +15,28 @@ import {
 } from '@/services/data-services'
 import {
   backfillWrongQuestionsFromAnswerLogs,
-  markWrongQuestionReviewed,
+  buildWrongDueCountByTreeNode,
+  countDueWrongQuestions,
+  formatDueBranchHint,
+  isWrongQuestionReviewDue,
   parseWrongDerivedPayload,
+  summarizeDueOutsideLearningTypeScope,
 } from '@/services/wrong-question-helpers'
+import { useWrongBookDueStore } from '@/stores/wrong-book-due'
+import { WRONG_BOOK_UI } from '@/constants/question-bank-copy'
+import { QUESTION_BANK_TYPE_LABELS, questionBankNoScoreType } from '@/constants/question-bank-types'
+import {
+  collectLeafDescendants,
+  collectSubtreeNodeIds,
+  findLearningTypeNodeById,
+} from '@/utils/learningTypeTree'
+import {
+  buildLearningTypeTreeBranches,
+  collectLearningTypeBranchIds,
+  flattenLearningTypeTreeDisplay,
+} from '@/utils/questionBankTreeTable'
 import { validateChoiceQuestionJson } from '@/utils/choiceQuestion'
-import type { TestUnit } from '@/views/learning/question-bank/components/questionBankTestTypes'
+import { usePageFocusStore } from '@/stores/page-focus'
 
 type LearningTypeNode = LearningType & {
   level: number
@@ -28,6 +46,10 @@ type LearningTypeNode = LearningType & {
 export type WrongBookSortField = 'wrongCount' | 'reviewStage'
 
 export function useWrongBookPage() {
+  const pageFocusStore = usePageFocusStore()
+  const wrongBookDueStore = useWrongBookDueStore()
+  const route = useRoute()
+  const router = useRouter()
   const ONLY_DUE_KEY = 'wrong-book-only-due-v2'
   const ONLY_DUE_KEY_LEGACY = 'wrong-book-only-due'
   const SELECTED_LT_KEY = 'wrong-book-selected-learning-type-id'
@@ -69,6 +91,8 @@ export function useWrongBookPage() {
   const trashRows = ref<WrongQuestionTrash[]>([])
   const selectedTrashIds = ref<number[]>([])
   const showQuestionTest = ref(false)
+  /** 进入错题测验时冻结的错题列表（用于 DeepSeek 变式出题） */
+  const wrongBookTestSnapshot = ref<WrongQuestion[]>([])
 
   const viewingBankQuestion = ref<QuestionBank | null>(null)
   const viewingWrongRow = ref<WrongQuestion | null>(null)
@@ -77,7 +101,7 @@ export function useWrongBookPage() {
 
   /**
    * 进入错题详情时冻结的「上下题」顺序（当前筛选 + 排序下各条 id），
-   * 避免打开详情后复习时间更新、列表重排导致题标与上一题/下一题错位。
+   * 避免列表筛选/排序变化导致题标与上一题/下一题错位。
    */
   const detailNavOrderIds = ref<number[]>([])
 
@@ -85,11 +109,7 @@ export function useWrongBookPage() {
   const wrongBookSortField = ref<WrongBookSortField | null>(null)
   const wrongBookSortOrder = ref<'asc' | 'desc'>('asc')
 
-  const typeTextMap: Record<QuestionBank['type'], string> = {
-    general: '一般题型',
-    choice: '选择题型',
-    mindmap: '思维导图',
-  }
+  const typeTextMap = QUESTION_BANK_TYPE_LABELS
 
   const normalizeQuestionBanks = (raw: QuestionBank[]) =>
     raw.map((item) => ({
@@ -104,9 +124,30 @@ export function useWrongBookPage() {
     return learningTypes.value.find((item) => item.id === id)?.name ?? '未分类'
   }
 
-  const selectedLearningTypeName = computed(() =>
-    getLearningTypeName(selectedLearningTypeId.value ?? undefined),
-  )
+  const selectedLearningTypeName = computed(() => {
+    if (selectedLearningTypeId.value == null) return '全库'
+    return getLearningTypeName(selectedLearningTypeId.value)
+  })
+
+  const selectedNode = computed(() => {
+    const id = selectedLearningTypeId.value
+    if (id == null) return null
+    return findLearningTypeNodeById(treeNodes.value, id)
+  })
+
+  const descendantLeafNodes = computed(() => {
+    const node = selectedNode.value
+    if (!node) return []
+    return collectLeafDescendants(node)
+  })
+
+  const descendantSubtreeIds = computed(() => {
+    const node = selectedNode.value
+    if (!node) return []
+    return collectSubtreeNodeIds(node)
+  })
+
+  const isParentNodeSelected = computed(() => (selectedNode.value?.children.length ?? 0) > 0)
 
   const treeNodes = computed<LearningTypeNode[]>(() => {
     const map = new Map<number, LearningTypeNode>()
@@ -128,14 +169,75 @@ export function useWrongBookPage() {
     return roots
   })
 
+  const scopedWrongRows = computed(() => {
+    let rows = wrongRows.value.slice()
+    if (selectedLearningTypeId.value == null) return rows
+    const node = selectedNode.value
+    if (!node) return []
+    const idSet = new Set(collectSubtreeNodeIds(node))
+    return rows.filter((r) => r.learningTypeId != null && idSet.has(r.learningTypeId))
+  })
+
+  const dueCountInScope = computed(() => countDueWrongQuestions(scopedWrongRows.value))
+
+  const dueCountByTreeNode = computed(() => {
+    const map = buildWrongDueCountByTreeNode(treeNodes.value, wrongRows.value)
+    return Object.fromEntries(map) as Record<number, number>
+  })
+
+  const dueOutsideBranches = computed(() => {
+    if (selectedLearningTypeId.value == null) return []
+    const scopeSubtreeSet = new Set(descendantSubtreeIds.value)
+    return summarizeDueOutsideLearningTypeScope(
+      treeNodes.value,
+      wrongRows.value,
+      scopeSubtreeSet,
+    )
+  })
+
+  const dueNoticeText = computed(() => {
+    const scope = dueCountInScope.value
+    const global = wrongBookDueStore.dueCount
+    const branchHint = formatDueBranchHint(dueOutsideBranches.value)
+
+    if (selectedLearningTypeId.value == null) {
+      if (scope > 0) return `全库共 ${scope} 道待复习，建议进行错题测验。`
+      return ''
+    }
+
+    if (scope > 0) {
+      if (global > scope) {
+        return WRONG_BOOK_UI.dueScopePartialGlobal(scope, global, branchHint)
+      }
+      return WRONG_BOOK_UI.dueScopeNotice(scope)
+    }
+    if (global > 0) return WRONG_BOOK_UI.dueScopeNoneGlobal(global, branchHint)
+    return ''
+  })
+
+  const showViewAllDueButton = computed(
+    () => wrongBookDueStore.dueCount > 0 && selectedLearningTypeId.value != null,
+  )
+
+  const showAllDueQuestions = () => {
+    selectedLearningTypeId.value = null
+    onlyDue.value = true
+    currentPage.value = 1
+    selectedRowIds.value = []
+  }
+
+  const selectLearningTypeForDue = (learningTypeId: number) => {
+    selectedLearningTypeId.value = learningTypeId
+    onlyDue.value = true
+    currentPage.value = 1
+    selectedRowIds.value = []
+  }
+
   const filteredWrongRows = computed(() => {
     const nowMs = Date.now()
-    let rows = wrongRows.value.slice()
-    if (selectedLearningTypeId.value) {
-      rows = rows.filter((r) => r.learningTypeId === selectedLearningTypeId.value)
-    }
+    let rows = scopedWrongRows.value.slice()
     if (onlyDue.value) {
-      rows = rows.filter((r) => new Date(r.nextReviewAt).getTime() <= nowMs)
+      rows = rows.filter((r) => isWrongQuestionReviewDue(r, nowMs))
     }
     const field = wrongBookSortField.value
     const order = wrongBookSortOrder.value
@@ -151,42 +253,46 @@ export function useWrongBookPage() {
     })
   })
 
-  /** 当前筛选下可组卷的题库原题（导图衍生小题走 presetUnits，不重复放此列表） */
-  const wrongBookTestQuestionBanks = computed(() => {
+  /** 错题测验构建时查找关联题库条目（不直接作为测验题） */
+  const wrongBookTestBankLookup = computed(() => {
     const ids = new Set<number>()
     for (const r of filteredWrongRows.value) {
-      if (parseWrongDerivedPayload(r.derivedPayloadJson)) continue
+      const derived = parseWrongDerivedPayload(r.derivedPayloadJson)
+      if (derived?.parentQuestionBankId != null) {
+        ids.add(derived.parentQuestionBankId)
+      }
       if (r.questionBankId != null) ids.add(r.questionBankId)
     }
     if (!ids.size) return []
     return questionBanks.value.filter((q) => q.id != null && ids.has(q.id))
   })
 
-  /** 当前筛选下带完整快照的导图衍生错题，与题库测验页相同结构 */
-  const wrongBookTestPresetUnits = computed<TestUnit[]>(() => {
-    const out: TestUnit[] = []
-    const seen = new Set<string>()
-    for (const r of filteredWrongRows.value) {
-      const derived = parseWrongDerivedPayload(r.derivedPayloadJson)
-      if (!derived) continue
-      const parent = questionBanks.value.find((q) => q.id === derived.parentQuestionBankId)
-      if (!parent) continue
-      const key = `${derived.parentQuestionBankId}\t${derived.stem}\t${derived.subIndex}\t${derived.subTotal}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      out.push({
-        kind: 'mindmap-mcq',
-        parent,
-        stem: derived.stem,
-        options: [...derived.options],
-        correctIndices: [...derived.correctIndices],
-        mode: derived.mode,
-        subIndex: derived.subIndex,
-        subTotal: derived.subTotal,
-      })
-    }
-    return out
+  const parentTreeBranches = computed(() => {
+    const node = selectedNode.value
+    if (!node || !isParentNodeSelected.value) return []
+    return buildLearningTypeTreeBranches(node, filteredWrongRows.value, (r) => r.learningTypeId)
   })
+
+  const expandedTreeBranchIds = ref<Set<string>>(new Set())
+
+  const parentTreeTableRows = computed(() =>
+    flattenLearningTypeTreeDisplay(parentTreeBranches.value, expandedTreeBranchIds.value),
+  )
+
+  const isTreeBranchExpanded = (branchId: string) => expandedTreeBranchIds.value.has(branchId)
+
+  const toggleTreeBranch = (branchId: string) => {
+    const next = new Set(expandedTreeBranchIds.value)
+    if (next.has(branchId)) next.delete(branchId)
+    else next.add(branchId)
+    expandedTreeBranchIds.value = next
+  }
+
+  const rowKeyForTreeRow = (row: (typeof parentTreeTableRows.value)[number], idx: number) => {
+    if (row.kind === 'branch') return `branch-${row.branchId}`
+    const item = row.item
+    return `entry-${item.id ?? idx}`
+  }
 
   const paginatedWrongRows = computed(() => {
     const all = filteredWrongRows.value
@@ -194,24 +300,47 @@ export function useWrongBookPage() {
     return all.slice(start, start + pageSize.value)
   })
 
-  const pageSelectedCount = computed(() =>
-    paginatedWrongRows.value.filter((r) => r.id != null && selectedRowIds.value.includes(r.id)).length,
+  const selectableFilteredIds = computed(() =>
+    filteredWrongRows.value.map((r) => r.id).filter((id): id is number => id != null),
   )
 
-  const pageAllSelected = computed(() => {
-    if (!paginatedWrongRows.value.length) return false
-    return pageSelectedCount.value === paginatedWrongRows.value.length
+  const pageSelectedCount = computed(() => {
+    const ids = isParentNodeSelected.value
+      ? selectableFilteredIds.value
+      : paginatedWrongRows.value.map((r) => r.id).filter((id): id is number => id != null)
+    return ids.filter((id) => selectedRowIds.value.includes(id)).length
   })
 
-  const pageIndeterminate = computed(
-    () => pageSelectedCount.value > 0 && pageSelectedCount.value < paginatedWrongRows.value.length,
-  )
+  const pageAllSelected = computed(() => {
+    const ids = isParentNodeSelected.value
+      ? selectableFilteredIds.value
+      : paginatedWrongRows.value.map((r) => r.id).filter((id): id is number => id != null)
+    if (!ids.length) return false
+    return pageSelectedCount.value === ids.length
+  })
 
-  // 切换知识点：回到第一页并清空勾选
+  const pageIndeterminate = computed(() => {
+    const ids = isParentNodeSelected.value
+      ? selectableFilteredIds.value
+      : paginatedWrongRows.value.map((r) => r.id).filter((id): id is number => id != null)
+    const n = pageSelectedCount.value
+    return n > 0 && n < ids.length
+  })
+
+  // 切换知识点：回到第一页、清空勾选、收起树表分组
   watch(selectedLearningTypeId, () => {
     currentPage.value = 1
     selectedRowIds.value = []
+    expandedTreeBranchIds.value = new Set()
   })
+
+  watch(
+    () => [parentTreeBranches.value, isParentNodeSelected.value] as const,
+    ([branches, isParent]) => {
+      if (!isParent || branches.length === 0) return
+      expandedTreeBranchIds.value = new Set(collectLearningTypeBranchIds(branches))
+    },
+  )
 
   // 仅到期 / 每页条数：只回到第一页，不清空勾选
   watch(
@@ -262,6 +391,7 @@ export function useWrongBookPage() {
         selectedLearningTypeId.value = null
       }
       message.value = ''
+      void wrongBookDueStore.refresh()
     } catch {
       message.value = '错题本加载失败，请刷新后重试。'
     } finally {
@@ -270,9 +400,9 @@ export function useWrongBookPage() {
   }
 
   const rowTypeLabel = (row: WrongQuestion) => {
-    if (row.questionType === 'mindmap-mcq') return '导图衍生小题'
-    if (row.questionType === 'choice') return '选择题型'
-    return '一般题型'
+    if (row.questionType === 'mindmap-mcq') return '导图选择题'
+    if (row.questionType === 'choice') return '选择题'
+    return '作答题'
   }
 
   const rowDisplayTitle = (row: WrongQuestion) => {
@@ -280,7 +410,7 @@ export function useWrongBookPage() {
     if (row.questionType === 'mindmap-mcq' && stem) return stem
     const fromBank =
       row.questionBankId != null ? questionBanks.value.find((q) => q.id === row.questionBankId)?.title : ''
-    return (fromBank || row.title || '未知题目').trim()
+    return (fromBank || row.title || '未知条目').trim()
   }
 
   const rowReviewStageLabel = (stage: number) => `第 ${Math.max(1, stage + 1)} 轮复习`
@@ -296,6 +426,17 @@ export function useWrongBookPage() {
   const rowDueTag = (row: WrongQuestion) => {
     const due = new Date(row.nextReviewAt).getTime()
     return due <= Date.now() ? '应复习' : '待安排'
+  }
+
+  const rowScoreDisplay = (row: WrongQuestion) => {
+    if (row.questionType === 'mindmap-mcq') return '-'
+    const bank =
+      row.questionBankId != null
+        ? questionBanks.value.find((q) => q.id === row.questionBankId)
+        : undefined
+    if (!bank) return '-'
+    if (questionBankNoScoreType(bank)) return '-'
+    return String(bank.score ?? 0)
   }
 
   const toggleWrongBookSort = (field: WrongBookSortField) => {
@@ -330,27 +471,12 @@ export function useWrongBookPage() {
       .filter((id): id is number => id != null)
   }
 
-  const autoReviewOnOpen = async (row: WrongQuestion) => {
-    if (row.id == null) return
-    try {
-      await markWrongQuestionReviewed(row)
-      await loadData()
-      if (viewingWrongRow.value?.id === row.id) {
-        const latest = wrongRows.value.find((x) => x.id === row.id)
-        if (latest) viewingWrongRow.value = latest
-      }
-    } catch {
-      // 静默处理，避免影响详情打开
-    }
-  }
-
   const openRow = async (row: WrongQuestion, opts?: { keepNavSnapshot?: boolean }) => {
     message.value = ''
     if (!opts?.keepNavSnapshot) {
       captureWrongBookDetailNavSnapshot()
     }
     viewingWrongRow.value = row
-    void autoReviewOnOpen(row)
     const payload = parseWrongDerivedPayload(row.derivedPayloadJson)
     if (payload) {
       viewingBankQuestion.value = null
@@ -380,6 +506,7 @@ export function useWrongBookPage() {
   }
 
   const closeDetail = () => {
+    void pageFocusStore.exitStretchIfActive()
     viewingWrongRow.value = null
     viewingBankQuestion.value = null
     viewingDerivedPayload.value = null
@@ -444,22 +571,29 @@ export function useWrongBookPage() {
       message.value = '请先在左侧树中选择知识点。'
       return
     }
-    if (
-      wrongBookTestQuestionBanks.value.length === 0 &&
-      wrongBookTestPresetUnits.value.length === 0
-    ) {
-      message.value =
-        '当前筛选下没有可测验的题目（可能原题已删除，或仅有无法还原的导图错题记录）。'
+    if (filteredWrongRows.value.length === 0) {
+      message.value = '当前筛选下没有可测验的错题。'
+      return
+    }
+    const hasBankRef = filteredWrongRows.value.some((r) => {
+      if (r.questionBankId != null) return true
+      const derived = parseWrongDerivedPayload(r.derivedPayloadJson)
+      return derived?.parentQuestionBankId != null
+    })
+    if (!hasBankRef) {
+      message.value = '当前错题没有关联学习内容，无法生成测验。'
       return
     }
     closeDetail()
     showTrashPanel.value = false
+    wrongBookTestSnapshot.value = filteredWrongRows.value.slice()
     showQuestionTest.value = true
     message.value = ''
   }
 
   const closeWrongBookTest = () => {
     showQuestionTest.value = false
+    wrongBookTestSnapshot.value = []
     void loadData()
   }
 
@@ -488,7 +622,9 @@ export function useWrongBookPage() {
   }
 
   const toggleSelectAllOnPage = (checked: boolean) => {
-    const pageIds = paginatedWrongRows.value.map((r) => r.id).filter((id): id is number => id != null)
+    const pageIds = isParentNodeSelected.value
+      ? selectableFilteredIds.value
+      : paginatedWrongRows.value.map((r) => r.id).filter((id): id is number => id != null)
     const set = new Set(selectedRowIds.value)
     if (checked) pageIds.forEach((id) => set.add(id))
     else pageIds.forEach((id) => set.delete(id))
@@ -664,7 +800,21 @@ export function useWrongBookPage() {
     }
   }
 
+  const applyAllDueViewFromRoute = () => {
+    if (route.query.allDue !== '1') return
+    showAllDueQuestions()
+    void router.replace({ path: route.path })
+  }
+
+  watch(
+    () => route.query.allDue,
+    () => {
+      applyAllDueViewFromRoute()
+    },
+  )
+
   onMounted(() => {
+    applyAllDueViewFromRoute()
     void loadData()
   })
 
@@ -685,8 +835,8 @@ export function useWrongBookPage() {
     trashRows,
     selectedTrashIds,
     showQuestionTest,
-    wrongBookTestQuestionBanks,
-    wrongBookTestPresetUnits,
+    wrongBookTestBankLookup,
+    wrongBookTestSnapshot,
     viewingBankQuestion,
     viewingWrongRow,
     viewingDerivedPayload,
@@ -694,8 +844,23 @@ export function useWrongBookPage() {
     typeTextMap,
     getLearningTypeName,
     selectedLearningTypeName,
+    selectedNode,
+    descendantLeafNodes,
+    isParentNodeSelected,
     treeNodes,
     filteredWrongRows,
+    dueCountInScope,
+    dueCountByTreeNode,
+    dueOutsideBranches,
+    dueNoticeText,
+    showViewAllDueButton,
+    showAllDueQuestions,
+    selectLearningTypeForDue,
+    parentTreeTableRows,
+    isTreeBranchExpanded,
+    toggleTreeBranch,
+    rowKeyForTreeRow,
+    WRONG_BOOK_UI,
     paginatedWrongRows,
     pageAllSelected,
     pageIndeterminate,
@@ -707,6 +872,7 @@ export function useWrongBookPage() {
     rowReviewStageLabel,
     formatTime,
     rowDueTag,
+    rowScoreDisplay,
     toggleWrongBookSort,
     wrongBookSortIndicator,
     wrongBookSortAriaLabel,

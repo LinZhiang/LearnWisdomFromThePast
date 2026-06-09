@@ -41,7 +41,7 @@ export type CachePreview = {
   }
 }
 
-const parseSnapshot = (raw: string): CacheSnapshot => {
+export const parseCacheSnapshot = (raw: string): CacheSnapshot => {
   const parsed = JSON.parse(raw) as CacheSnapshot
   const data = parsed.data
   if (!data) throw new Error('缓存文件格式不正确')
@@ -67,7 +67,7 @@ export const exportCacheSnapshot = async () => {
 }
 
 export const previewCacheSnapshot = (raw: string): CachePreview => {
-  const parsed = parseSnapshot(raw)
+  const parsed = parseCacheSnapshot(raw)
   const data = parsed.data
   return {
     exportedAt: parsed.exportedAt,
@@ -86,7 +86,7 @@ export const previewCacheSnapshot = (raw: string): CachePreview => {
 }
 
 export const importCacheSnapshot = async (raw: string) => {
-  const parsed = parseSnapshot(raw)
+  const parsed = parseCacheSnapshot(raw)
   const data = parsed.data
 
   await db.transaction(

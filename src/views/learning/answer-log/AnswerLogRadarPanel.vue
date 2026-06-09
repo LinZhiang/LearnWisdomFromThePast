@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { ElMessage } from 'element-plus'
-import DOMPurify from 'dompurify'
-import * as echarts from 'echarts'
-import { marked } from 'marked'
+import type { ECharts } from '@/utils/echartsRadar'
+import { markdownToSafeHtml } from '@/utils/markdownToHtml'
 import type { ComponentPublicInstance } from 'vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { QuizRadarDimension } from '@/services/deepseek'
@@ -24,15 +23,9 @@ const radarDimensions = ref<QuizRadarDimension[]>([])
 const radarAnalysisMd = ref('')
 
 const radarChartRef = ref<HTMLDivElement | null>(null)
-let radarChartInstance: echarts.ECharts | null = null
+let radarChartInstance: ECharts | null = null
 
-const radarAnalysisHtml = computed(() => {
-  const md = radarAnalysisMd.value.trim()
-  if (!md) return ''
-  const raw = marked.parse(md, { async: false })
-  if (typeof raw !== 'string') return ''
-  return DOMPurify.sanitize(raw, { USE_PROFILES: { html: true } })
-})
+const radarAnalysisHtml = computed(() => markdownToSafeHtml(radarAnalysisMd.value))
 
 function disposeRadarChart() {
   radarChartInstance?.dispose()
@@ -56,14 +49,14 @@ async function flushDomAndRenderRadarChart(
     requestAnimationFrame(() => resolve())
   })
   if (radarDimensions.value.length !== 6) return
-  if (!updateRadarChart()) {
+  if (!(await updateRadarChart())) {
     onFail(radarChartError.value || '雷达图未显示，可点击「重试加载雷达图」')
   } else {
     requestAnimationFrame(() => resizeRadarChart())
   }
 }
 
-function updateRadarChart(): boolean {
+async function updateRadarChart(): Promise<boolean> {
   radarChartError.value = ''
   const el = radarChartRef.value
   const dims = radarDimensions.value
@@ -74,7 +67,8 @@ function updateRadarChart(): boolean {
   }
   try {
     disposeRadarChart()
-    radarChartInstance = echarts.init(el)
+    const { initRadarChart } = await import('@/utils/echartsRadar')
+    radarChartInstance = await initRadarChart(el)
     radarChartInstance.setOption({
       color: ['#2563eb'],
       tooltip: { trigger: 'item' },

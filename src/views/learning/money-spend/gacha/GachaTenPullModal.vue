@@ -46,7 +46,7 @@ const progressText = computed(() => {
     return `${ladderPrefix}第 ${revealIndex.value + 1} / 10 张`
   }
   if (phase.value === 'summary') {
-    return ladderPullBanner.value || '10 连抽完成'
+    return '抽奖结果'
   }
   return ''
 })
@@ -191,9 +191,11 @@ onBeforeUnmount(() => clearTimers())
           </div>
 
           <div v-else-if="phase === 'summary'" class="gacha-summary">
-            <p v-if="ladderPullBanner" class="gacha-ladder-banner">{{ ladderPullBanner }}</p>
-            <p v-if="settlementSummary" class="gacha-settlement">{{ settlementSummary }}</p>
-            <div class="gacha-summary-grid">
+            <div class="gacha-summary-head">
+              <p v-if="ladderPullBanner" class="gacha-ladder-banner">{{ ladderPullBanner }}</p>
+              <p v-if="settlementSummary" class="gacha-settlement">{{ settlementSummary }}</p>
+            </div>
+            <div class="gacha-summary-grid" aria-label="本次抽到的十张卡牌">
               <div
                 v-for="item in results"
                 :key="item.index"
@@ -494,9 +496,17 @@ onBeforeUnmount(() => clearTimers())
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   align-items: stretch;
-  gap: clamp(6px, 1vh, 12px);
+  gap: clamp(8px, 1.2vh, 14px);
   min-height: 0;
   overflow: hidden;
+}
+
+.gacha-summary-head {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
 }
 
 .gacha-ladder-banner {
@@ -506,38 +516,39 @@ onBeforeUnmount(() => clearTimers())
   font-weight: 700;
   color: #fde047;
   letter-spacing: 0.04em;
-  flex-shrink: 0;
 }
 
 .gacha-summary-grid {
   width: 100%;
   min-height: 0;
-  flex: 1;
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  grid-template-rows: repeat(2, minmax(0, 1fr));
-  align-content: center;
-  justify-items: stretch;
-  align-items: center;
+  grid-template-rows: repeat(2, minmax(88px, 1fr));
+  align-content: stretch;
+  justify-items: center;
+  align-items: stretch;
   gap: clamp(8px, 1.4vh, 18px);
+  overflow: auto;
+  padding: 2px 0;
+  scrollbar-gutter: stable;
 }
 
 .gacha-summary-slot {
   min-width: 0;
   min-height: 0;
   width: 100%;
-  height: 100%;
+  max-width: 100%;
   container-type: size;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 .gacha-summary-slot :deep(.gacha-card--grid) {
   width: 100%;
   height: auto;
-  max-height: 100%;
+  max-height: none;
   min-width: 0;
 }
 
@@ -549,7 +560,7 @@ onBeforeUnmount(() => clearTimers())
   .gacha-summary-grid,
   .gacha-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-template-rows: repeat(5, minmax(0, 1fr));
+    grid-template-rows: repeat(5, minmax(72px, 1fr));
   }
 }
 

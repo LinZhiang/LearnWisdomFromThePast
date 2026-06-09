@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { QuestionBank } from '@/db/models'
+import { questionBankEligibleForTest } from '@/constants/question-bank-types'
 import type { QuestionBankTestLeafEntryPayload } from './questionBankTestTypes'
 
 const props = defineProps<{
@@ -24,7 +25,9 @@ const visible = computed({
 })
 
 const listable = computed(() =>
-  props.questions.filter((q): q is QuestionBank & { id: number } => q.id != null),
+  props.questions.filter(
+    (q): q is QuestionBank & { id: number } => q.id != null && questionBankEligibleForTest(q),
+  ),
 )
 
 watch(
@@ -64,28 +67,30 @@ const onConfirm = () => {
 <template>
   <el-dialog
     v-model="visible"
-    title="题目测试"
+    title="测验"
     width="min(92vw, 520px)"
     class="test-entry-dialog"
     destroy-on-close
     append-to-body
   >
-    <p v-if="listable.length === 0" class="test-entry-empty">当前节点下暂无题目。</p>
+    <p v-if="listable.length === 0" class="test-entry-empty">
+      当前节点下没有可测验的学习内容（仅预览的讲义不会出现在此列表）。
+    </p>
     <template v-else>
       <p class="test-entry-lead">
         当前节点：<strong>{{ nodeName }}</strong>
       </p>
 
       <el-radio-group v-model="scope" class="test-entry-scope">
-        <el-radio value="all" size="large">测试全部</el-radio>
-        <el-radio value="partial" size="large">测试部分（勾选题目）</el-radio>
+        <el-radio value="all" size="large">测验全部</el-radio>
+        <el-radio value="partial" size="large">测验部分（勾选条目）</el-radio>
       </el-radio-group>
 
       <section v-if="scope === 'partial'" class="test-entry-partial">
         <div class="test-entry-partial-actions">
           <el-button text type="primary" @click="selectAll">全选</el-button>
           <el-button text type="primary" @click="clearAll">清空</el-button>
-          <span class="test-entry-count">已选 {{ selectedIds.length }} / {{ listable.length }} 道</span>
+          <span class="test-entry-count">已选 {{ selectedIds.length }} / {{ listable.length }} 条</span>
         </div>
         <el-scrollbar max-height="min(52vh, 320px)" class="test-entry-scroll">
           <el-checkbox-group v-model="selectedIds" class="test-entry-checkgroup">
@@ -102,7 +107,7 @@ const onConfirm = () => {
 
     <template #footer>
       <el-button @click="visible = false">取消</el-button>
-      <el-button type="primary" :disabled="primaryDisabled" @click="onConfirm">开始测试</el-button>
+      <el-button type="primary" :disabled="primaryDisabled" @click="onConfirm">开始测验</el-button>
     </template>
   </el-dialog>
 </template>

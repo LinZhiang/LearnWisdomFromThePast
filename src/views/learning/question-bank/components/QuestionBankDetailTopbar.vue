@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import { computed } from 'vue'
 import type { QuestionBank } from '@/db/models'
 import type { QuestionFavoriteTarget } from '@/services/favorite-question-helpers'
+import PageFocusToggle from '@/components/PageFocusToggle.vue'
 import QuestionBankFavoriteButton from './QuestionBankFavoriteButton.vue'
 
 const props = defineProps<{
@@ -36,7 +37,7 @@ const navPositionText = computed(() => {
   const n = props.navList?.length ?? 0
   const i = navIndex.value
   if (!showQuestionNav.value || i < 0) return ''
-  return `第 ${i + 1} / ${n} 题`
+  return `第 ${i + 1} / ${n} 条`
 })
 
 const canPrev = computed(() => showQuestionNav.value && navIndex.value > 0)
@@ -84,13 +85,14 @@ defineExpose({ handleArrowLeft, handleArrowRight })
     <div class="detail-topbar-row">
       <div class="detail-title-block">
         <h3 class="detail-title">{{ question.title }}</h3>
-        <ul class="detail-meta-chips" aria-label="题目属性">
+        <ul class="detail-meta-chips" aria-label="内容属性">
           <li class="meta-chip">{{ typeLabel }}</li>
           <li class="meta-chip meta-chip-muted">{{ learningTypeName }}</li>
-          <li v-if="!isMindmap" class="meta-chip meta-chip-accent">分数 {{ question.score ?? 0 }}</li>
+          <li v-if="!isMindmap" class="meta-chip meta-chip-accent">分值 {{ question.score ?? 0 }}</li>
         </ul>
       </div>
       <div class="detail-actions">
+        <PageFocusToggle variant="stretch" />
         <QuestionBankFavoriteButton
           v-if="favoriteTarget"
           plain
@@ -104,14 +106,14 @@ defineExpose({ handleArrowLeft, handleArrowRight })
           type="primary"
           @click="emit('edit', question)"
         >
-          编辑此题
+          编辑
         </el-button>
       </div>
     </div>
-    <div v-if="showQuestionNav" class="detail-nav-row" aria-label="题目切换">
-      <el-button :icon="ArrowLeft" :disabled="!canPrev" @click="goPrev">上一题</el-button>
+    <div v-if="showQuestionNav" class="detail-nav-row" aria-label="条目切换">
+      <el-button :icon="ArrowLeft" :disabled="!canPrev" @click="goPrev">上一条</el-button>
       <span class="detail-nav-pos">{{ navPositionText }}</span>
-      <el-button :icon="ArrowRight" :disabled="!canNext" @click="goNext">下一题</el-button>
+      <el-button :icon="ArrowRight" :disabled="!canNext" @click="goNext">下一条</el-button>
     </div>
   </header>
 </template>
@@ -127,6 +129,11 @@ defineExpose({ handleArrowLeft, handleArrowRight })
   padding: 14px 16px;
   background: var(--app-surface);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.detail-title-block {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .detail-topbar-row {
@@ -201,5 +208,7 @@ defineExpose({ handleArrowLeft, handleArrowRight })
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+  flex: 0 0 auto;
+  max-width: 100%;
 }
 </style>
