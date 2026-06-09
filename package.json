@@ -15,6 +15,7 @@
     "textures:compress-gacha": "node scripts/compress-gacha-textures.mjs",
     "install:server": "npm install --prefix server",
     "build": "vue-tsc -b && vite build",
+    "deploy": "wrangler deploy",
     "preview": "vite preview",
     "type-check": "vue-tsc --noEmit",
     "lint": "eslint . --ext .ts,.vue",
@@ -36,7 +37,8 @@
     "typescript-eslint": "^8.59.1",
     "vite": "^8.0.10",
     "vue-eslint-parser": "^10.4.0",
-    "vue-tsc": "^3.2.7"
+    "vue-tsc": "^3.2.7",
+    "wrangler": "^4.20.0"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",

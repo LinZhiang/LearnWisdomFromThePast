@@ -16,6 +16,10 @@ server/.env
 dist-ssr
 *.local
 
+# 本地误放的安装包 / 工程文件
+src/assets/voice/*.exe
+src/assets/voice/*.pkf
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
