@@ -16,7 +16,7 @@
     "install:server": "npm install --prefix server",
     "build": "vue-tsc -b && vite build",
     "deploy": "wrangler pages deploy",
-    "deploy:pages": "wrangler pages deploy dist --project-name=learning-app-ad8",
+    "deploy:pages": "wrangler pages deploy dist --project-name=wengu-zhixue",
     "preview": "vite preview",
     "type-check": "vue-tsc --noEmit",
     "lint": "eslint . --ext .ts,.vue",

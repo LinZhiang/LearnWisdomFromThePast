@@ -1,4 +1,7 @@
-# Cloudflare Pages（*.pages.dev 国内访问通常优于 workers.dev）
-name = "learning-app-ad8"
+# Cloudflare Pages — 温故智学网
+# 正式访问地址（部署成功后）：https://wengu-zhixue.pages.dev
+# 说明见 docs/cloudflare-deploy.md
+
+name = "wengu-zhixue"
 pages_build_output_dir = "./dist"
 compatibility_date = "2024-09-23"
