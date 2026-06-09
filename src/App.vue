@@ -11,8 +11,6 @@ import { useWrongBookDueStore } from '@/stores/wrong-book-due'
 import { useWebUsageTracker } from '@/composables/useWebUsageTracker'
 import { useAppearanceStore } from '@/stores/appearance'
 import { applyDailyStudyingPenaltyIfNeeded } from '@/views/learning/question-bank-score/wen-wu-study-mode'
-import BackgroundMusicMiniPlayer from '@/components/BackgroundMusicMiniPlayer.vue'
-import { useBackgroundMusicStore } from '@/stores/background-music'
 import { usePageFocusStore } from '@/stores/page-focus'
 import { usePomodoroStore } from '@/stores/pomodoro'
 import { attachMouseShortcutNavigationGuards } from '@/utils/blockMouseShortcutNavigation'
@@ -63,7 +61,6 @@ const {
   themeStyle,
 } = storeToRefs(appearanceStore)
 
-const backgroundMusicStore = useBackgroundMusicStore()
 const wrongBookDueStore = useWrongBookDueStore()
 const pomodoroStore = usePomodoroStore()
 const showAppWelcome = ref(false)
@@ -81,7 +78,6 @@ function onStretchEscape(e: KeyboardEvent) {
 
 onMounted(() => {
   detachMouseShortcutGuards = attachMouseShortcutNavigationGuards()
-  backgroundMusicStore.ensureInitialized()
   pomodoroStore.attachLifecycle()
   pageFocusStore.syncFromBrowserFullscreen()
   document.addEventListener('fullscreenchange', pageFocusStore.syncFromBrowserFullscreen)
@@ -172,7 +168,6 @@ onBeforeUnmount(() => {
         <RouterView />
       </div>
     </main>
-    <BackgroundMusicMiniPlayer v-show="!pageFocusStretch" />
     <GuideWelcomeDialog v-model="showAppWelcome" />
   </div>
 </template>

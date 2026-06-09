@@ -257,10 +257,7 @@ const copyMindmapMarkdown = async () => {
       <span class="page-kicker">工具 01</span>
       <h2 class="page-title">思维导图</h2>
       <p class="page-subtitle">
-        在下方粘贴长文，由 DeepSeek
-        分层拆细；**同级最多 4 分支**（超出自动用 #### 归类）；单条 ≤40 字；通俗子项。
-        可拆分最多
-        {{ MINDMAP_GENERATE_MAX }} 段分别生成；每段文首为概括性主题（无序号），下载 txt 以该主题命名。
+        粘贴长文，一键生成可导入题库的导图 Markdown（需联网）。
       </p>
     </header>
 
@@ -303,7 +300,7 @@ const copyMindmapMarkdown = async () => {
             :disabled="generating"
             @click="generateFromDeepseek"
           >
-            {{ generating && generateProgress ? generateProgress : '用 DeepSeek 生成导图 Markdown' }}
+            {{ generating && generateProgress ? generateProgress : '生成导图 Markdown' }}
           </el-button>
         </footer>
       </div>

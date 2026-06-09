@@ -90,7 +90,7 @@ const canSubmit = computed(
   () => hasAiProxy.value && keywordInput.value.trim().length > 0 && !loading.value,
 )
 
-const askButtonLabel = computed(() => (hasStarted.value ? '继续追问' : '向 DeepSeek 提问'))
+const askButtonLabel = computed(() => (hasStarted.value ? '继续追问' : '向智能助手提问'))
 
 const onAsk = async () => {
   const text = keywordInput.value.trim()
@@ -134,9 +134,9 @@ const onReset = () => {
 </script>
 
 <template>
-  <aside class="keyword-panel" aria-label="DeepSeek 关键字追问">
+  <aside class="keyword-panel" aria-label="关键字追问">
     <header class="keyword-panel-head">
-      <h3 class="keyword-panel-title">DeepSeek 关键字追问</h3>
+      <h3 class="keyword-panel-title">关键字追问</h3>
       <p class="keyword-panel-desc">
         结合本题材料提问；首次提问后可继续追问，对话会保留在本题上下文中。
       </p>
@@ -162,7 +162,7 @@ const onReset = () => {
           <el-tooltip
             :disabled="hasAiProxy"
             placement="top"
-            content="开发：在 server/.env 配置 DEEPSEEK_API_KEY 并运行 npm run dev:api；生产：配置 VITE_AI_API_BASE。详见 docs/ENV-说明.md"
+            content="智能功能需联网；若按钮不可用，请检查网络或联系站点管理员。"
           >
             <span class="keyword-btn-wrap">
               <el-button type="primary" plain :loading="loading" :disabled="!canSubmit" @click="onAsk">
@@ -176,7 +176,7 @@ const onReset = () => {
         </div>
         <p v-if="error" class="keyword-error">{{ error }}</p>
       </div>
-      <div v-if="displayTurns.length" class="keyword-answer" aria-label="DeepSeek 回答">
+      <div v-if="displayTurns.length" class="keyword-answer" aria-label="智能助手回答">
         <div class="keyword-answer-inner">
           <DeepseekChatThread :turns="displayTurns" first-assistant-title="回答" />
         </div>

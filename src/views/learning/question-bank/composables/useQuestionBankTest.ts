@@ -447,7 +447,7 @@ export function useQuestionBankTest(
         quizSessionId: sid,
         learningTypeName: props.learningTypeName,
         unitIndex: 0,
-        questionTitle: '（DeepSeek 测验报告）',
+        questionTitle: '（智能测验报告）',
         questionType: 'session-report',
         score: 0,
         maxScore: 0,
@@ -1427,7 +1427,7 @@ export function useQuestionBankTest(
       try {
         let merged: TestUnit[] = []
         if (isWrongBook) {
-          buildStatus.value = '正在连接 DeepSeek，为错题生成变式测验题…'
+          buildStatus.value = '正在为错题生成变式测验题…'
           const { units: built, skipped, recovered, deduped } = await buildWrongBookTestUnits(
             wrongRows,
             props.questions,

@@ -330,23 +330,23 @@ function formatDeepSeekFetchError(status: number, errText: string): string {
     status === 400 &&
     /maximum context length|requested.*tokens/i.test(upstreamMsg)
   ) {
-    return '讲义或材料过长，已超过 DeepSeek 单次可处理上限。请缩短讲义正文、减少内嵌大图后保存，再重新测验；或降低自动出题数量。'
+    return '讲义或材料过长，已超过单次可处理上限。请缩短讲义正文、减少内嵌大图后保存，再重新测验；或降低自动出题数量。'
   }
   if (status === 402 || /insufficient balance/i.test(upstreamMsg)) {
-    return 'DeepSeek 账户余额不足（402）：请在 https://platform.deepseek.com 充值或更换有余额的 API Key，并更新 server/.env 中的 DEEPSEEK_API_KEY。'
+    return 'AI 服务账户余额不足，请联系站点管理员。'
   }
   if (status === 401 || /invalid.*api.*key|authentication/i.test(upstreamMsg)) {
-    return 'DeepSeek API Key 无效或未授权（401）：请检查 server/.env 中的 DEEPSEEK_API_KEY 是否正确。'
+    return 'AI 服务未授权，请联系站点管理员检查配置。'
   }
   if (status === 503) {
     return upstreamMsg.includes('DEEPSEEK_API_KEY')
-      ? '本地 AI 代理未配置密钥：请在 server/.env 填写 DEEPSEEK_API_KEY 并运行 npm run dev:api。'
+      ? '智能服务暂未配置，请联系站点管理员。'
       : `AI 服务暂不可用（503）${upstreamMsg ? `：${upstreamMsg}` : ''}`
   }
   if (status === 502) {
-    return `无法连接 DeepSeek 上游（502）${upstreamMsg ? `：${upstreamMsg}` : '，请检查网络或代理服务是否在运行。'}`
+    return `无法连接 AI 服务（502）${upstreamMsg ? `：${upstreamMsg}` : '，请检查网络后重试。'}`
   }
-  return `DeepSeek 请求失败（${status}）${upstreamMsg ? `：${upstreamMsg}` : errText ? `：${errText.slice(0, 120)}` : ''}`
+  return `AI 请求失败（${status}）${upstreamMsg ? `：${upstreamMsg}` : errText ? `：${errText.slice(0, 120)}` : ''}`
 }
 
 async function deepseekChatCompletion(
@@ -395,10 +395,10 @@ async function deepseekChatCompletion(
       choice.message.reasoning_content.trim().length > 0
     if (choice?.finish_reason === 'length' && hasReasoning) {
       throw new Error(
-        'DeepSeek 回复被长度上限截断（思考过程占满 token）。请缩短讲义/材料或减少自动出题数量后重试。',
+        '回复被长度上限截断。请缩短讲义/材料或减少自动出题数量后重试。',
       )
     }
-    throw new Error('DeepSeek 未返回有效内容（模型未产出正文，请稍后重试）')
+    throw new Error('智能服务未返回有效内容，请稍后重试')
   }
   return text
 }
@@ -456,7 +456,7 @@ ${body}`
     model: resolveChatModel(DEEPSEEK_MODEL_HEAVY),
   })
   const md = stripMindmapMarkdownFence(text)
-  if (!md) throw new Error('DeepSeek 未返回有效的讲义内容')
+  if (!md) throw new Error('智能服务未返回有效的讲义内容')
   return md
 }
 
@@ -585,7 +585,7 @@ ${body}`
     model: resolveChatModel(DEEPSEEK_MODEL_HEAVY),
   })
   const md = stripMindmapMarkdownFence(text)
-  if (!md) throw new Error('DeepSeek 未返回有效的导图 Markdown')
+  if (!md) throw new Error('智能服务未返回有效的导图 Markdown')
   return md
 }
 
@@ -724,7 +724,7 @@ export function buildQuestionSolveUserMessage(input: QuestionSolveInput): string
 }
 
 /**
- * 统一入口：一般题型或选择题型的 DeepSeek 解答（经后端代理，不在浏览器携带密钥）。
+ * 统一入口：一般题型或选择题型的智能解答（经后端代理，不在浏览器携带密钥）。
  */
 export async function requestQuestionSolve(input: QuestionSolveInput): Promise<string> {
   if (input.kind === 'general') {
@@ -792,7 +792,7 @@ export async function requestChoiceDistractors(input: {
   try {
     parsed = JSON.parse(stripJsonFence(raw))
   } catch {
-    throw new Error('DeepSeek 返回的干扰项不是合法 JSON')
+    throw new Error('智能服务返回的干扰项格式异常')
   }
   if (!Array.isArray(parsed)) throw new Error('干扰项格式应为 JSON 数组')
   const out = parsed.map((x) => String(x).trim()).filter(Boolean)
@@ -832,7 +832,7 @@ export async function requestMindmapDerivedMcqs(input: {
     try {
       return JSON.parse(stripJsonFence(raw))
     } catch {
-      throw new Error('DeepSeek 返回的思维导图小题不是合法 JSON')
+      throw new Error('智能服务返回的思维导图小题格式异常')
     }
   }
 
@@ -887,7 +887,7 @@ export async function requestHandoutDerivedMcqs(input: {
     try {
       return JSON.parse(stripJsonFence(raw))
     } catch {
-      throw new Error('DeepSeek 返回的讲义小题不是合法 JSON')
+      throw new Error('智能服务返回的讲义小题格式异常')
     }
   }
 
@@ -944,7 +944,7 @@ export async function requestHandoutDerivedGeneralQuestions(input: {
     try {
       return JSON.parse(stripJsonFence(raw))
     } catch {
-      throw new Error('DeepSeek 返回的讲义一般题不是合法 JSON')
+      throw new Error('智能服务返回的讲义一般题格式异常')
     }
   }
 
@@ -1061,7 +1061,7 @@ export async function requestHandoutDerivedJudgmentQuestions(input: {
     try {
       return JSON.parse(stripJsonFence(raw))
     } catch {
-      throw new Error('DeepSeek 返回的讲义判断题不是合法 JSON')
+      throw new Error('智能服务返回的讲义判断题格式异常')
     }
   }
 
@@ -1139,7 +1139,7 @@ export async function requestWrongBookMcqVariant(input: {
   try {
     parsed = JSON.parse(stripJsonFence(raw))
   } catch {
-    throw new Error('DeepSeek 返回的错题变式题不是合法 JSON')
+    throw new Error('智能服务返回的错题变式题格式异常')
   }
   const mcq = parseMindmapMcqObject(parsed)
   if (!mcq) throw new Error('错题变式选择题未能通过校验')
@@ -1184,7 +1184,7 @@ export async function requestWrongBookChoiceVariant(input: {
   try {
     parsed = JSON.parse(stripJsonFence(raw))
   } catch {
-    throw new Error('DeepSeek 返回的错题变式题不是合法 JSON')
+    throw new Error('智能服务返回的错题变式题格式异常')
   }
   const mcq = parseMindmapMcqObject(parsed)
   if (!mcq) throw new Error('错题变式选择题未能通过校验')
@@ -1229,7 +1229,7 @@ export async function requestWrongBookGeneralVariant(input: {
   try {
     parsed = JSON.parse(stripJsonFence(raw))
   } catch {
-    throw new Error('DeepSeek 返回的错题变式作答题不是合法 JSON')
+    throw new Error('智能服务返回的错题变式作答题格式异常')
   }
   if (!parsed || typeof parsed !== 'object') {
     throw new Error('错题变式作答题格式无效')
@@ -1428,7 +1428,7 @@ export async function requestQuizRadarAnalysis(input: {
   try {
     parsed = JSON.parse(stripJsonFence(raw))
   } catch {
-    throw new Error('DeepSeek 返回的雷达数据不是合法 JSON')
+    throw new Error('智能服务返回的雷达数据格式异常')
   }
   if (!parsed || typeof parsed !== 'object') throw new Error('雷达数据格式无效')
   const o = parsed as Record<string, unknown>

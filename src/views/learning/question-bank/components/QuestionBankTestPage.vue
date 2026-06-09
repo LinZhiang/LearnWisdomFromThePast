@@ -136,7 +136,7 @@ const currentMcqUnit = computed(() => {
       <template v-else-if="qb.phase === 'building'">
         <p class="test-muted">{{ qb.buildStatus }}</p>
         <p v-if="!testBuildConfig" class="test-hint">
-          正在调用 DeepSeek 生成测验题目，请稍候。
+          正在生成测验题目，请稍候。
         </p>
       </template>
       <template v-else-if="qb.phase === 'ready'">

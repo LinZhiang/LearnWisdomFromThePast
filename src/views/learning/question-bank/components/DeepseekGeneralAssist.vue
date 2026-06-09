@@ -129,7 +129,7 @@ const canUseAssist = computed(() => {
 })
 
 const solveButtonLabel = computed(() =>
-  props.mistakeAware ? 'DeepSeek 错因解析' : 'DeepSeek 解答',
+  props.mistakeAware ? '智能错因解析' : '智能解答',
 )
 
 const firstAssistantTitle = computed(() =>
@@ -249,7 +249,7 @@ const onReset = () => {
       <el-tooltip
         :disabled="hasAiProxy"
         placement="top"
-        content="开发：server/.env 配置 DEEPSEEK_API_KEY 并运行 npm run dev:api；生产：VITE_AI_API_BASE。详见 docs/ENV-说明.md"
+        content="智能功能需联网；若按钮不可用，请检查网络或联系站点管理员。"
       >
         <span class="deepseek-btn-wrap">
           <el-button
@@ -298,7 +298,7 @@ const onReset = () => {
         <el-tooltip
           :disabled="hasAiProxy"
           placement="top"
-          content="开发：server/.env 配置 DEEPSEEK_API_KEY 并运行 npm run dev:api；生产：VITE_AI_API_BASE。详见 docs/ENV-说明.md"
+          content="智能功能需联网；若按钮不可用，请检查网络或联系站点管理员。"
         >
           <span class="deepseek-btn-wrap">
             <el-button type="primary" plain :loading="loading" :disabled="!canSubmitFollowup" @click="onFollowup">

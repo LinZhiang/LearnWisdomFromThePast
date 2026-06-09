@@ -32,7 +32,7 @@ function startReading() {
     </template>
     <div class="guide-welcome-dialog__body">
       <p class="guide-welcome-dialog__lead">
-        这是你的本地学习助手：建知识点、录题库、AI 测验、错题复习与成绩记录。需要详细步骤时可打开顶栏「操作说明」。
+        这是你的本地学习助手：建目录、录题库、在线测验与错题复习；详细步骤见顶栏「操作说明」。
       </p>
       <ol class="guide-welcome-dialog__steps">
         <li>在「学习类型编辑」建好目录树</li>

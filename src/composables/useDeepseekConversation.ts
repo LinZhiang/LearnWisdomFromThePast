@@ -47,8 +47,8 @@ export function useDeepseekConversation(options: {
   function assistantPair(rawAssistant: string): { api: string; display: string } {
     const api = rawAssistant.trim()
     const display = sanitizeAssistantReplyForDisplay(rawAssistant)
-    if (!api) throw new Error('DeepSeek 未返回有效内容')
-    if (!display) throw new Error('DeepSeek 未返回可展示的回答')
+    if (!api) throw new Error('智能服务未返回有效内容')
+    if (!display) throw new Error('智能服务未返回可展示的回答')
     return { api, display }
   }
 

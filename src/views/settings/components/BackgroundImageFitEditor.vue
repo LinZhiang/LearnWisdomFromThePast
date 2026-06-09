@@ -392,7 +392,7 @@ function onZoomChange() {
         </div>
       </div>
       <p class="bg-fit-editor__hint">
-        拖动调整位置 · 红框内为顶栏遮挡区 · 翻转/重置取景不另扣费
+        拖动调整位置 · 红框内为顶栏遮挡区 · 可翻转或重置取景
       </p>
     </div>
   </div>

@@ -219,9 +219,7 @@ onBeforeUnmount(() => {
       <span class="page-kicker">工具 04</span>
       <h2 class="page-title">口算练习</h2>
       <p class="page-subtitle">
-        限时口算，结果仅在本页展示、不写入本地。按数字键 <strong>1～3</strong> 或
-        <strong>1～4</strong> 选择对应选项；答对 <strong>+1 秒</strong>，答错
-        <strong>-1 秒</strong>，答完自动进入下一题。
+        限时口算练习，成绩仅在本页显示，不会写入本地记录。
       </p>
     </header>
 

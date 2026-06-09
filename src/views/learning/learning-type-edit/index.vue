@@ -117,7 +117,7 @@ onMounted(async () => {
       <span class="page-kicker">智学 01</span>
       <h2 class="page-title">学习类型编辑</h2>
       <p class="page-subtitle">
-        左侧管理分类树：添加根节点建立大类，选中节点后可添加子节点；右侧以思维导图实时预览结构（可拖动、缩放）。
+        左侧建分类树，右侧预览导图结构（可拖动、缩放画布）。
       </p>
     </header>
 

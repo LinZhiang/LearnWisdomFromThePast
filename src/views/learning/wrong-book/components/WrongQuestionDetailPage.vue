@@ -124,7 +124,7 @@ const formatTime = (iso?: string) => {
       </div>
 
       <div class="detail-section detail-section-deepseek">
-        <h4>DeepSeek 解析</h4>
+        <h4>智能解析</h4>
         <DeepseekGeneralAssist
           :title="row.title"
           :analysis-html="sourceQuestion?.analysis ?? ''"

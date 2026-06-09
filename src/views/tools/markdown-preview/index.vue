@@ -63,9 +63,7 @@ async function copyMarkdown() {
       <span class="page-kicker">工具 03</span>
       <h2 class="page-title">Markdown 预览</h2>
       <p class="page-subtitle">
-        在左侧输入或粘贴 Markdown，也可上传 <strong>.md / .txt / .docx</strong> 文件（旧版
-        <strong>.doc</strong> 请先另存为 docx）。右侧实时显示渲染效果；纯文本会按段落显示，可在左侧补上
-        <code>#</code> 标题等 Markdown 语法。
+        左侧编辑 Markdown 或上传文档，右侧实时预览渲染效果。
       </p>
     </header>
 

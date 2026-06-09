@@ -17,15 +17,10 @@ import {
   mergeQuestionBankPack,
   previewQuestionBankPack,
 } from '@/services/question-bank-pack'
-import {
-  BACKGROUND_IMAGE_SET_FEE,
-  isBackgroundImageRemoval,
-  settleBackgroundImageSetFee,
-} from '@/services/background-image-billing'
+import { isBackgroundImageRemoval, settleBackgroundImageSetFee } from '@/services/background-image-billing'
 import { fileToStorableBackgroundDataUrl, isLikelyImageFile } from '@/utils/backgroundImageUpload'
 import { isDataUrlBackground } from '@/utils/backgroundImageFit'
 import BackgroundImageFitEditor from './components/BackgroundImageFitEditor.vue'
-import BackgroundMusicSection from './components/BackgroundMusicSection.vue'
 
 const appearanceStore = useAppearanceStore()
 const {
@@ -100,12 +95,10 @@ const applyBackgroundImageWithBilling = (next: string): boolean => {
     uploadMessage.value = charge.message
     return false
   }
-  if (charge.charged) {
-    uploadMessage.value = `已设置背景图，扣除 ${BACKGROUND_IMAGE_SET_FEE} 元，当前余额 ${charge.balance} 元。`
-  } else if (!isBackgroundImageRemoval(next)) {
-    uploadMessage.value = '已设置背景图（本次未扣费）。'
-  } else if (isBackgroundImageRemoval(next)) {
-    uploadMessage.value = '已去除背景图（不扣费）。'
+  if (!isBackgroundImageRemoval(next)) {
+    uploadMessage.value = '已设置背景图。'
+  } else {
+    uploadMessage.value = '已去除背景图。'
   }
   return true
 }
@@ -135,7 +128,7 @@ const tryCompressAndSaveBackground = async (file: File): Promise<'ok' | 'storage
       charge = settleBackgroundImageSetFee(prev, dataUrl)
     } catch {
       appearanceStore.updateBackgroundImage(prev)
-      uploadMessage.value = '扣费处理异常，已恢复原有背景图，请稍后重试。'
+      uploadMessage.value = '保存失败，已恢复原有背景图，请稍后重试。'
       return 'billing_fail'
     }
     if (!charge.ok) {
@@ -145,11 +138,7 @@ const tryCompressAndSaveBackground = async (file: File): Promise<'ok' | 'storage
     }
     await appearanceStore.initBackgroundImageFitFromUrl(dataUrl)
     await nextTick()
-    if (charge.charged) {
-      uploadMessage.value = `已保存本地背景图：${file.name}，扣除 ${BACKGROUND_IMAGE_SET_FEE} 元，当前余额 ${charge.balance} 元。可在下方拖动调整位置与缩放。`
-    } else {
-      uploadMessage.value = `已保存本地背景图：${file.name}（本次未扣费）。可在下方拖动调整位置与缩放。`
-    }
+    uploadMessage.value = `已保存本地背景图：${file.name}，可在下方拖动调整位置与缩放。`
     return 'ok'
   }
   return 'storage_fail'
@@ -308,9 +297,7 @@ const uploadBankPackFile = async (event: Event) => {
       <span class="page-kicker">系统 01</span>
       <h2 class="page-title">界面设置</h2>
       <p class="page-subtitle">
-        支持设置背景颜色、背景图片和整体风格，设置会自动保存。上传<strong>本地背景图</strong>后可在取景框内拖动调整位置、用滑条缩放与旋转，并支持水平/垂直翻转与「重置取景」（不另扣费）。新设或更换背景时，余额足够则扣
-        <strong>{{ BACKGROUND_IMAGE_SET_FEE }} 元</strong>（不设宵禁与余额门槛；不足时跳过扣费仍可设置；清空 URL 去除背景不扣费）。有背景图时，半透明背景色会叠在图片上方；切换整体风格时会将背景色同步为该风格的推荐色（你可再微调）。深色/柔和下若仍为默认白且透明度
-        100%，则视为不叠色以免挡住主题底色。顶栏与内容面板透明度只降低衬底不透明度，文字与正文内图片不受影响；拉得过低时可配合毛玻璃略微提亮可读性。学习内容字号（讲义、题目查看、测验）可在下方单独调节，便于课堂投影。
+        调整背景、主题风格与正文字号，修改会自动保存在本机浏览器。
       </p>
     </header>
 
@@ -494,8 +481,6 @@ const uploadBankPackFile = async (event: Event) => {
       <el-button class="settings-action-btn" @click="appearanceStore.reset">恢复默认</el-button>
     </div>
   </section>
-
-  <BackgroundMusicSection />
   </div>
 </template>
 

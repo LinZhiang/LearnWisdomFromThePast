@@ -118,7 +118,7 @@ const assistTitle = () => {
 
     <div class="test-assist-block">
       <el-button type="primary" plain :loading="assistLoading" @click="$emit('run-assist')">
-        DeepSeek 答题思路（不泄题）
+        智能答题思路（不泄题）
       </el-button>
       <p v-if="assistError" class="test-error">{{ assistError }}</p>
       <div v-if="assistHtml" class="test-assist-md deepseek-md">
@@ -157,7 +157,7 @@ const assistTitle = () => {
       <div class="test-rich ql-snow ql-editor" v-html="safe(analysisForCurrent)" />
     </div>
     <div v-if="correctLabels.length" class="test-section test-mcq-deepseek">
-      <h5>{{ mcqMistakeAware ? 'DeepSeek 错因解析' : 'DeepSeek 解答' }}</h5>
+      <h5>{{ mcqMistakeAware ? '智能错因解析' : '智能解答' }}</h5>
       <DeepseekGeneralAssist
         :title="assistTitle()"
         :choice-mode="unit.mode"

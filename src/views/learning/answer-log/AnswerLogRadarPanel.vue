@@ -195,7 +195,7 @@ onBeforeUnmount(() => {
         :disabled="radarLoading"
         @click="openRadarPanel"
       >
-        <template v-if="!showRadarPanel">查看 DeepSeek 综合判定与六维雷达</template>
+        <template v-if="!showRadarPanel">查看综合判定与六维雷达</template>
         <template v-else-if="radarLoading">正在生成…</template>
         <template v-else-if="radarError">请求失败，可再次点击或下方重试</template>
         <template v-else-if="radarDimensions.length === 6 && radarChartError">雷达图未显示，点击重试渲染</template>
@@ -205,7 +205,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-if="showRadarPanel" class="alog-radar-panel">
-      <h4 class="alog-radar-title">DeepSeek 答题解析 · 六维雷达</h4>
+      <h4 class="alog-radar-title">智能答题解析 · 六维雷达</h4>
       <p v-if="radarLoading" class="alog-muted">正在根据作答情况生成解析与雷达图…</p>
       <div v-else-if="radarError" class="alog-radar-error-block">
         <p class="alog-error">{{ radarError }}</p>

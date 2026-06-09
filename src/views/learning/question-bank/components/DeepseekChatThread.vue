@@ -21,7 +21,7 @@ const firstAssistantIndex = computed(() =>
 </script>
 
 <template>
-  <div v-if="renderedTurns.length" class="deepseek-thread" aria-label="DeepSeek 对话">
+  <div v-if="renderedTurns.length" class="deepseek-thread" aria-label="智能对话">
     <article
       v-for="(turn, index) in renderedTurns"
       :key="index"
@@ -35,7 +35,7 @@ const firstAssistantIndex = computed(() =>
             ? firstAssistantTitle
             : turn.role === 'user'
               ? '你的追问'
-              : 'DeepSeek')
+              : '智能助手')
         }}
       </h4>
       <!-- eslint-disable-next-line vue/no-v-html -->

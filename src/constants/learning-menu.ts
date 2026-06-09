@@ -10,7 +10,7 @@ export interface LearningMenuGroup {
   children: LearningMenuItem[]
 }
 
-/** 顶栏二级菜单分组（A 练题 / B 统计 / C 工具） */
+/** 顶栏二级菜单分组（题库学习 / 学习工具） */
 export const learningMenuGroups: LearningMenuGroup[] = [
   {
     key: 'study-practice',
@@ -40,27 +40,6 @@ export const learningMenuGroups: LearningMenuGroup[] = [
         key: 'answer-log',
         title: '答题日志',
         path: '/learning/answer-log',
-      },
-    ],
-  },
-  {
-    key: 'stats-records',
-    title: '成绩统计',
-    children: [
-      {
-        key: 'question-bank-score',
-        title: '学习分数',
-        path: '/learning/question-bank-score',
-      },
-      {
-        key: 'money-spend',
-        title: '金钱消费',
-        path: '/learning/money-spend',
-      },
-      {
-        key: 'score-ranking',
-        title: '分数排名',
-        path: '/learning/score-ranking',
       },
     ],
   },

@@ -68,7 +68,7 @@ const safe = (html?: string) => sanitizeRichHtml(html ?? '')
       <div class="test-rich ql-snow ql-editor" v-html="safe(question.analysis)" />
     </div>
     <div class="test-section test-mcq-deepseek">
-      <h5>{{ generalMistakeAware ? 'DeepSeek 错因解析' : 'DeepSeek 解答' }}</h5>
+      <h5>{{ generalMistakeAware ? '智能错因解析' : '智能解答' }}</h5>
       <DeepseekGeneralAssist
         :key="`general-post-${question.id}-${currentIndex}`"
         :title="question.title"

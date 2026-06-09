@@ -51,7 +51,7 @@ const onTreeSelect = (id: number | null) => {
       <header class="page-hero">
         <span class="page-kicker">智学 03</span>
         <h2 class="page-title">题库收藏</h2>
-        <p class="page-subtitle">按学习类型查看已收藏的学习内容（含测验中生成的导图选择题等）。</p>
+        <p class="page-subtitle">按学习类型查看已收藏的内容，支持测验与详情阅读。</p>
       </header>
       <div class="favorite-layout">
         <LearningTypeTreePanel

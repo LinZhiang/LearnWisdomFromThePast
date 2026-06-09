@@ -68,9 +68,7 @@ const copyLecture = async () => {
       <span class="page-kicker">工具 02</span>
       <h2 class="page-title">资料整理</h2>
       <p class="page-subtitle">
-        左侧粘贴<strong>截图或图片</strong>（Ctrl+V）；系统先在本地识别图中文字，再由
-        DeepSeek 按「<strong>请把上图内容转成文字并标出重点</strong>」整理讲义。需已启动
-        AI 代理（<code>npm run dev:api</code>）；首次识别会下载中文字库，稍等即可。
+        粘贴截图或文字，识别后整理成带重点标记的讲义（需联网）。
       </p>
     </header>
 
@@ -79,7 +77,7 @@ const copyLecture = async () => {
         <header class="material-panel-head">
           <h3 class="material-panel-title">原始资料</h3>
           <p class="material-panel-hint">
-            请直接 Ctrl+V 粘贴讲义/PPT 截图（可多张）；也可补充文字说明，系统会一并交给 DeepSeek。
+            请直接 Ctrl+V 粘贴讲义或 PPT 截图（可多张），也可补充文字说明。
           </p>
         </header>
         <div class="material-panel-body material-panel-body--rich">
@@ -105,7 +103,7 @@ const copyLecture = async () => {
             v-model="lectureMd"
             type="textarea"
             :rows="10"
-            placeholder="点击「生成讲义」后，DeepSeek 整理结果将显示在此…"
+            placeholder="点击「生成讲义」后，整理结果将显示在此…"
             class="material-md-input"
             spellcheck="false"
           />

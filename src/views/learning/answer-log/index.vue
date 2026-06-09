@@ -221,7 +221,7 @@ const entryQuestionDisplayTitle = (entry: QuestionBankTestSessionEntry) => {
       <span class="page-kicker">智学 06</span>
       <h2 class="page-title">答题日志</h2>
       <p class="page-subtitle">
-        学习题库、错题本、题目收藏中的「题目测试」均会写入日志，并按同一次测验汇总为一行（列表中可区分来源）；点击查看详情可浏览得分表与逐题明细，并可在本页重新生成 DeepSeek 六维雷达（需配置 API Key）。
+        查看历次测验得分与逐题明细，可生成学习表现雷达图（需联网）。
       </p>
     </header>
 
